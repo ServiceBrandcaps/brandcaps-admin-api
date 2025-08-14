@@ -18,41 +18,42 @@ export const runtime = "nodejs";
  * Devuelve: { items, total, totalPages, page }
  */
 export async function GET(req) {
-  await connectDB();
-  const { searchParams } = new URL(req.url);
+  await connectDB()
 
-  const filters = {};
+  const { searchParams } = new URL(req.url)
+  const filters = {}
 
-  // name (contains)
-  if (searchParams.has("name")) {
-    filters.name = new RegExp(searchParams.get("name"), "i");
+  if (searchParams.has('name')) {
+    filters.name = new RegExp(searchParams.get('name'), 'i')
   }
 
-  // families (multi)
-  const fams = searchParams.getAll("family");
-  if (fams.length) {
-    filters["families.description"] = {
-      $in: fams.map((f) => new RegExp(f, "i")),
-    };
+  const families = searchParams.getAll('family')
+  if (families.length) {
+    filters['families.description'] = { $in: families.map(v => new RegExp(v, 'i')) }
   }
 
-  // subattributes (multi)
-  const subs = searchParams.getAll("subattribute");
-  if (subs.length) {
-    filters["subattributes.name"] = {
-      $in: subs.map((s) => new RegExp(s, "i")),
-    };
+  const subattrs = searchParams.getAll('subattribute')
+  if (subattrs.length) {
+    filters['subattributes.name'] = { $in: subattrs.map(v => new RegExp(v, 'i')) }
   }
 
-  const page = parseInt(searchParams.get("page") || "1", 10);
-  const limit = parseInt(searchParams.get("limit") || "100", 10);
-  const skip = (page - 1) * limit;
+  const page  = parseInt(searchParams.get('page')  || '1', 10)
+  const limit = parseInt(searchParams.get('limit') || '100', 10)
+  const skip  = (page - 1) * limit
 
-  const total = await Product.countDocuments(filters);
-  const items = await Product.find(filters).skip(skip).limit(limit).lean();
-  const totalPages = Math.max(1, Math.ceil(total / limit));
+  const totalCount = await Product.countDocuments(filters)
+  const totalPages = Math.ceil(totalCount / limit)
+  const products   = await Product.find(filters).skip(skip).limit(limit).lean()
 
-  return NextResponse.json({ items, total, totalPages, page });
+  // DEVOLVEMOS AMBOS NOMBRES PARA COMPATIBILIDAD
+  return NextResponse.json({
+    items: products,
+    products,
+    total: totalCount,
+    totalCount,
+    totalPages,
+    page
+  })
 }
 
 /**
