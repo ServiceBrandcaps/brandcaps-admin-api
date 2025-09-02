@@ -1,70 +1,114 @@
-// src/app/api/admin/products/route.js
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/mongoose";
 import Product from "@/models/Product";
 import { uploadBufferToCloudinary } from "@/lib/uploads";
+import { generateSku } from "@/lib/sku";
 
 export const runtime = "nodejs";
 
+function num(v, d = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : d;
+}
+
+// Helpers de parseo seguros ---------------------------------
+function parseMaybeJSON(val, fallback) {
+  if (Array.isArray(val)) return val;
+  if (typeof val === "string") {
+    const s = val.trim();
+    if (!s) return fallback;
+    try { return JSON.parse(s); } catch { return fallback; }
+  }
+  if (val && typeof val === "object") return val;
+  return fallback;
+}
+
+function parseFamilies(input) {
+  // Acepta: array objetos, array strings, string "A, B", string JSON '["A","B"]'
+  const fromJson = parseMaybeJSON(input, null);
+  if (fromJson) {
+    return fromJson.map((f) => (typeof f === "string" ? { description: f } : f));
+  }
+  if (typeof input === "string") {
+    return input.split(",").map(s => s.trim()).filter(Boolean).map(description => ({ description }));
+  }
+  return [];
+}
+
+function parseSubattributes(input) {
+  const fromJson = parseMaybeJSON(input, null);
+  if (fromJson) {
+    return fromJson.map((s) => (typeof s === "string" ? { name: s } : s));
+  }
+  if (typeof input === "string") {
+    return input.split(",").map(s => s.trim()).filter(Boolean).map(name => ({ name }));
+  }
+  return [];
+}
+
+function normalizeImages(input) {
+  // Acepta: array de strings o array de objetos { image_url }/{ url }
+  const arr = parseMaybeJSON(input, []);
+  return arr.map((i) => {
+    if (typeof i === "string") return { image_url: i };
+    if (i?.image_url) return { image_url: i.image_url };
+    if (i?.url) return { image_url: i.url };
+    return null;
+  }).filter(Boolean);
+}
+
 /**
  * GET /api/admin/products
- * Filtros:
- *  - name: string (contains, i)
- *  - family: multi ?family=Escritura&family=Drinkware  (filtra por families.description)
- *  - subattribute: multi ?subattribute=Metal&subattribute=Algodón (filtra por subattributes.name)
- * Paginación:
- *  - page (default 1)
- *  - limit (default 100)
- * Devuelve: { items, total, totalPages, page }
  */
 export async function GET(req) {
-  await connectDB()
+  await connectDB();
 
-  const { searchParams } = new URL(req.url)
-  const filters = {}
+  const { searchParams } = new URL(req.url);
+  const filters = {};
 
-  if (searchParams.has('name')) {
-    filters.name = new RegExp(searchParams.get('name'), 'i')
+  if (searchParams.has("name")) {
+    filters.name = new RegExp(searchParams.get("name"), "i");
   }
 
-  const families = searchParams.getAll('family')
+  const families = searchParams.getAll("family");
   if (families.length) {
-    filters['families.description'] = { $in: families.map(v => new RegExp(v, 'i')) }
+    filters["families.description"] = {
+      $in: families.map((v) => new RegExp(v, "i")),
+    };
   }
 
-  const subattrs = searchParams.getAll('subattribute')
+  const subattrs = searchParams.getAll("subattribute");
   if (subattrs.length) {
-    filters['subattributes.name'] = { $in: subattrs.map(v => new RegExp(v, 'i')) }
+    filters["subattributes.name"] = {
+      $in: subattrs.map((v) => new RegExp(v, "i")),
+    };
   }
 
-  const page  = parseInt(searchParams.get('page')  || '1', 10)
-  const limit = parseInt(searchParams.get('limit') || '100', 10)
-  const skip  = (page - 1) * limit
+  const page = parseInt(searchParams.get("page") || "1", 10);
+  const limit = parseInt(searchParams.get("limit") || "100", 10);
+  const skip = (page - 1) * limit;
 
-  const totalCount = await Product.countDocuments(filters)
-  const totalPages = Math.ceil(totalCount / limit)
-  const products   = await Product.find(filters).skip(skip).limit(limit).lean()
+  const totalCount = await Product.countDocuments(filters);
+  const totalPages = Math.ceil(totalCount / limit);
+  const products = await Product.find(filters).skip(skip).limit(limit).lean();
 
-  // DEVOLVEMOS AMBOS NOMBRES PARA COMPATIBILIDAD
   return NextResponse.json({
     items: products,
     products,
     total: totalCount,
     totalCount,
     totalPages,
-    page
-  })
+    page,
+  });
 }
 
 /**
  * POST /api/admin/products
- * Crea producto. Soporta:
- *  - multipart/form-data (con imágenes -> Cloudinary)
- *  - application/json (sin archivos, images opcionales como [{image_url}] o URLs)
+ * Soporta multipart/form-data o application/json
  */
 export async function POST(req) {
   await connectDB();
-  const contentType = req.headers.get("content-type") || "";
+  const contentType = (req.headers.get("content-type") || "").toLowerCase();
 
   if (
     contentType.includes("multipart/form-data") ||
@@ -75,7 +119,10 @@ export async function POST(req) {
   }
 
   if (contentType.includes("application/json")) {
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body) {
+      return NextResponse.json({ error: "JSON body vacío" }, { status: 400 });
+    }
     return createFromJson(body);
   }
 
@@ -87,13 +134,10 @@ export async function POST(req) {
 
 /**
  * PATCH /api/admin/products
- * Edita producto. Soporta:
- *  - multipart/form-data (con opción replaceImages=true/false e imágenes nuevas)
- *  - application/json (margen, sección u otros campos simples)
  */
 export async function PATCH(req) {
   await connectDB();
-  const contentType = req.headers.get("content-type") || "";
+  const contentType = (req.headers.get("content-type") || "").toLowerCase();
 
   if (
     contentType.includes("multipart/form-data") ||
@@ -122,7 +166,60 @@ async function createFromFormData(formData) {
   const marginStr = formData.get("marginPercentage")?.toString() ?? "0";
   const section = formData.get("section")?.toString() ?? "";
   const frontSection = formData.get("frontSection")?.toString() ?? section;
-  const isBrandcaps = (formData.get("isBrandcaps")?.toString() ?? "false") === "true";
+  const description = formData.get("description")?.toString() ?? "";
+  const isBrandcaps =
+    (formData.get("isBrandcaps")?.toString() ?? "false") === "true";
+
+  // mínimo de pedido (default 20)
+  const moq = num(formData.get("minimum_order_quantity"), 20);
+  // escalas de precio
+  const p20_100   = num(formData.get("price_20_100"), 0);
+  const p100_plus = num(formData.get("price_100_plus"), 0);
+  const p500_plus = num(formData.get("price_500_plus"), 0);
+
+  const priceTiers = [
+    { min: 20,  max: 100, price: p20_100 },
+    { min: 101, max: 499, price: p100_plus },
+    { min: 500, max: null, price: p500_plus },
+  ].filter((t) => t.price > 0);
+
+  // variantes (puede venir JSON o vacío)
+  const variantsInput = formData.get("variants") || "[]";
+  const variantsIn = parseMaybeJSON(variantsInput, []);
+  const variants = variantsIn.map((v) => ({
+    id: v.id ?? undefined,
+    sku:
+      v.sku ||
+      generateSku({
+        name,
+        color: v.color || "",
+        size: v.size || "",
+        material: v.material || "",
+      }),
+    stock: num(v.stock, 0),
+    color: v.color || "",
+    size: v.size || "",
+    material: v.material || "",
+    achromatic: !!v.achromatic,
+  }));
+
+  // families / subattributes (coma-separados o JSON)
+  const families = parseFamilies(formData.get("families"));
+  const subattributes = parseSubattributes(formData.get("subattributes"));
+
+  // Imágenes -> Cloudinary
+  const files = formData.getAll("images");
+  const images = [];
+  for (const file of files) {
+    // En App Router los File vienen del Web API
+    if (typeof File !== "undefined" && file instanceof File) {
+      const buf = Buffer.from(await file.arrayBuffer());
+      const url = await uploadBufferToCloudinary(buf, file.name);
+      images.push({ image_url: url });
+    }
+  }
+
+  const external_id = generateSku(name);
 
   if (!name || !priceStr) {
     return NextResponse.json(
@@ -131,47 +228,21 @@ async function createFromFormData(formData) {
     );
   }
 
-  // families / subattributes coma-separados
-  const familiesStr = formData.get("families")?.toString() ?? "";
-  const subattrsStr = formData.get("subattributes")?.toString() ?? "";
-
-  const families = familiesStr
-    ? familiesStr
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean)
-        .map((description) => ({ description }))
-    : [];
-
-  const subattributes = subattrsStr
-    ? subattrsStr
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean)
-        .map((name) => ({ name }))
-    : [];
-
-  // Imágenes -> Cloudinary
-  const files = formData.getAll("images");
-  const images = [];
-  for (const file of files) {
-    if (typeof File !== "undefined" && file instanceof File) {
-      const buf = Buffer.from(await file.arrayBuffer());
-      const url = await uploadBufferToCloudinary(buf, file.name);
-      images.push({ image_url: url });
-    }
-  }
-
   try {
     const created = await Product.create({
+      external_id,
       name,
+      description,
       price: Number(priceStr),
       marginPercentage: Number(marginStr) || 0,
       frontSection,
       brandcapsProduct: isBrandcaps,
+      minimum_order_quantity: moq,
+      priceTiers,
       families,
       subattributes,
       images,
+      products: variants,
     });
     return NextResponse.json(created, { status: 201 });
   } catch (err) {
@@ -181,39 +252,75 @@ async function createFromFormData(formData) {
 
 async function createFromJson(body) {
   const {
-    name,
+    name = "",
     price,
     marginPercentage = 0,
     section,
     frontSection: fs,
+    description= "",
     isBrandcaps = true,
+    minimum_order_quantity = 20,
+    price_20_100 = 0,
+    price_100_plus = 0,
+    price_500_plus = 0,
     images = [],
-    families = [],
-    subattributes = [],
-  } = body;
+    families: famIn = [],
+    subattributes: subIn = [],
+    variants = [], // puede ser array o string JSON
+  } = body || {};
 
-  if (!name || price == null) {
+  if (!name.trim() || price == null) {
     return NextResponse.json(
       { error: "Nombre y precio son obligatorios" },
       { status: 400 }
     );
   }
 
-  // Normalizar imágenes: permitir strings o objetos { image_url }
-  const imagesNorm = (images || []).map((img) =>
-    typeof img === "string" ? { image_url: img } : img
-  );
+  const priceTiers = [
+    { min: 20,  max: 100, price: price_20_100 },
+    { min: 101, max: 499, price: price_100_plus },
+    { min: 500, max: null, price: price_500_plus },
+  ].filter((t) => t.price > 0);
+
+  const families      = parseFamilies(famIn);
+  const subattributes = parseSubattributes(subIn);
+  const variantsArr   = parseMaybeJSON(variants, []);
+  const imagesNorm    = normalizeImages(images);
+
+  const variantsMapped = variantsArr.map((v) => ({
+    id: v.id ?? undefined,
+    sku:
+      v.sku ||
+      generateSku({
+        name,
+        color: v.color || "",
+        size: v.size || "",
+        material: v.material || "",
+      }),
+    stock: num(v.stock, 0),
+    color: v.color || "",
+    size: v.size || "",
+    material: v.material || "",
+    achromatic: !!v.achromatic,
+  }));
+
+  const external_id = generateSku(name);
 
   try {
     const created = await Product.create({
-      name,
+      external_id,
+      name: name.trim(),
+      description,
       price: Number(price),
       marginPercentage: Number(marginPercentage) || 0,
       frontSection: fs ?? section ?? "",
       brandcapsProduct: !!isBrandcaps,
+      minimum_order_quantity,
+      priceTiers,
       images: imagesNorm,
       families,
       subattributes,
+      products: variantsMapped,
     });
     return NextResponse.json(created, { status: 201 });
   } catch (err) {
@@ -222,7 +329,7 @@ async function createFromJson(body) {
 }
 
 async function patchFromJson(body) {
-  const { id, _id, marginPercentage, section, frontSection, ...rest } = body;
+  const { id, _id, marginPercentage, section, frontSection,description, ...rest } = body;
   const docId = id || _id;
   if (!docId) {
     return NextResponse.json({ error: "id requerido" }, { status: 400 });
@@ -233,12 +340,14 @@ async function patchFromJson(body) {
     update.marginPercentage = Number(marginPercentage);
   if (frontSection !== undefined) update.frontSection = frontSection;
   if (section !== undefined) update.frontSection = section;
+  if (description !== undefined) update.description = description;
 
   try {
     const updated = await Product.findByIdAndUpdate(docId, update, {
       new: true,
     }).lean();
-    if (!updated) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (!updated)
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
     return NextResponse.json(updated);
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 500 });
@@ -254,6 +363,7 @@ async function patchFromFormData(formData) {
   const marginStr = formData.get("marginPercentage")?.toString();
   const section = formData.get("section")?.toString();
   const frontSection = formData.get("frontSection")?.toString();
+  const description = formData.get("description")?.toString();  
 
   const familiesStr = formData.get("families")?.toString();
   const subattrsStr = formData.get("subattributes")?.toString();
@@ -266,27 +376,16 @@ async function patchFromFormData(formData) {
   if (marginStr !== undefined) update.marginPercentage = Number(marginStr) || 0;
   if (frontSection !== undefined) update.frontSection = frontSection;
   if (section !== undefined) update.frontSection = section;
+  if (description !== undefined) update.description = description;
 
   if (familiesStr !== undefined) {
-    update.families = familiesStr
-      ? familiesStr
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean)
-          .map((description) => ({ description }))
-      : [];
+    update.families = parseFamilies(familiesStr);
   }
   if (subattrsStr !== undefined) {
-    update.subattributes = subattrsStr
-      ? subattrsStr
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean)
-          .map((name) => ({ name }))
-      : [];
+    update.subattributes = parseSubattributes(subattrsStr);
   }
 
-  // Procesar imágenes nuevas (Cloudinary)
+  // Imágenes nuevas (Cloudinary)
   const files = formData.getAll("images");
   const newImages = [];
   for (const file of files) {
@@ -298,8 +397,11 @@ async function patchFromFormData(formData) {
   }
 
   try {
-    let updated = await Product.findByIdAndUpdate(id, update, { new: true }).lean();
-    if (!updated) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    let updated = await Product.findByIdAndUpdate(id, update, {
+      new: true,
+    }).lean();
+    if (!updated)
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     if (newImages.length) {
       if (replaceImages) {
