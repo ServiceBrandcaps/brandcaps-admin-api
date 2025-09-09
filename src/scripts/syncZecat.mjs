@@ -2,19 +2,20 @@
 // Sincroniza TODOS los campos de TODOS los generic_product usando el modelo Product
 // Estrategia: 1) Lista IDs paginados 2) Trae detalle por ID 3) Upsert en Mongo
 
-import fetch from 'node-fetch';
-import { connectDB } from '../lib/mongoose.js'; 
-import { Product } from '../models/Product.sync.model.js';
+import fetch from "node-fetch";
+import { connectDB } from "../lib/mongoose.js";
+import { Product } from "../models/Product.sync.model.js";
 
 //const { Product } = genericModel; // el modelo exportado vía CommonJS
 
-const BASE = process.env.ZECAT_BASE?.replace(/\/$/, '') || 'https://api.zecat.com/v1';
+const BASE =
+  process.env.ZECAT_BASE?.replace(/\/$/, "") || "https://api.zecat.com/v1";
 const TOKEN = process.env.ZECAT_TOKEN;
 const PAGE_LIMIT = Number(process.env.ZECAT_PAGE_LIMIT || 500);
 const CONCURRENCY = Number(process.env.CONCURRENCY || 6);
 
 if (!TOKEN) {
-  console.error('❌ Falta ZECAT_TOKEN en el .env');
+  console.error("❌ Falta ZECAT_TOKEN en el .env");
   process.exit(1);
 }
 
@@ -22,12 +23,14 @@ async function fetchJSON(url) {
   const res = await fetch(url, {
     headers: {
       Authorization: `Bearer ${TOKEN}`,
-      Accept: 'application/json',
+      Accept: "application/json",
     },
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`HTTP ${res.status} ${res.statusText} → ${url} :: ${text.slice(0, 300)}`);
+    throw new Error(
+      `HTTP ${res.status} ${res.statusText} → ${url} :: ${text.slice(0, 300)}`
+    );
   }
   return res.json();
 }
@@ -37,7 +40,9 @@ async function listAllGenericIds(limit = PAGE_LIMIT) {
   let totalPages = 1;
   const ids = [];
   do {
-    const data = await fetchJSON(`${BASE}/generic_product?limit=${limit}&page=${page}`);
+    const data = await fetchJSON(
+      `${BASE}/generic_product?limit=${limit}&page=${page}`
+    );
     totalPages = data.total_pages || 1;
     const arr = data.generic_products || [];
     ids.push(...arr.map((g) => g.id));
@@ -74,13 +79,13 @@ async function upsertOne(doc) {
   );
 }
 
-
 async function main() {
-  console.log('🔗 Conectando a Mongo…');
+  console.log("🔗 Conectando a Mongo…");
   await connectDB();
-  await Product.init(); // asegura índices
+  await Product.collection.dropIndex("external_id_1");
+  await Product.init(); // o syncIndexes()
 
-  console.log('🧾 Listando IDs de product…');
+  console.log("🧾 Listando IDs de product…");
   const ids = await listAllGenericIds();
   console.log(`🔎 Descargando detalles de ${ids.length} productos…`);
 
@@ -104,7 +109,7 @@ async function main() {
   );
 
   await Promise.all(workers);
-  console.log('🎉 Sincronización completada');
+  console.log("🎉 Sincronización completada");
   process.exit(0);
 }
 

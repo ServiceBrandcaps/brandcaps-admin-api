@@ -279,9 +279,16 @@ const ProductSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Por si preferís índices fuera de la definición de campos:
-ProductSchema.index({ external_id: 1 }, { unique: true });
-ProductSchema.index({ "products.sku": 1 }, { unique: true, sparse: true });
+// ✅ Índice único para evitar duplicados del admin
+ProductSchema.index({ external_id: 1 }, { unique: true, name: "external_id_1" });
+
+// ✅ Índice único “sparse” para los docs que vienen de Zecat
+// (sparse permite que otros docs sin 'id' no violen el índice)
+ProductSchema.index({ id: 1 }, { unique: true, sparse: true, name: "id_1" });
+
+// ✅ Opcional: si tu SKU de variante debe ser único globalmente
+ProductSchema.index({ "products.sku": 1 }, { unique: true, sparse: true, name: "products.sku_1" });
+
 
 export default mongoose.models.Product ||
   mongoose.model("Product", ProductSchema);
