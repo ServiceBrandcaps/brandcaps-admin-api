@@ -154,6 +154,53 @@ const VariantsSchema = new Schema(
   { _id: false }
 );
 
+const ProductVariantSchema = new mongoose.Schema(
+  {
+    providerId: {
+      // antes "id" en Zecat
+      type: Number,
+      required: false,
+      index: true,
+    },
+    sku: {
+      // "00140160911001000500"
+      type: String,
+      required: true,
+      trim: true,
+      index: true,
+    },
+    stock: {
+      // 81
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    size: {
+      // "" (puede venir vacío)
+      type: String,
+      default: "",
+      trim: true,
+    },
+    color: {
+      // "" (puede venir vacío)
+      type: String,
+      default: "",
+      trim: true,
+    },
+    material: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    achromatic: {
+      // false
+      type: Boolean,
+      default: false,
+    },
+  },
+  { _id: false } // no generes _id para cada variante
+);
+
 // ---- Esquema principal ----
 const ProductSchema = new Schema(
   {
@@ -166,6 +213,13 @@ const ProductSchema = new Schema(
     description: String,
     description_wepod: String,
     type: String,
+
+    families: [{ id: String, description: String }],
+    subattributes: [{ id: Number, name: String, attribute_name: String }],
+    images: [{ image_url: String }],
+    products: [{ id: Number, sku: String, stock: Number }],
+    // Variantes
+    variants: { type: VariantsSchema, default: {} },
 
     // Cantidades mínimas
     minimum_order_quantity: Number,
@@ -181,6 +235,7 @@ const ProductSchema = new Schema(
     price_wepod: Number,
     currency: String,
     tax: Number,
+    discountPrice: Number,
 
     // Flags / publicación
     allow_simple_buy: Boolean,
@@ -206,9 +261,23 @@ const ProductSchema = new Schema(
     downloadableMaterialUrl: String, // mantener ambas por si viene typo
     supplementary_information_text: String,
     tag: String,
+    printing_types: { type: [String], default: [] }, 
 
     // Variantes
     variants: { type: VariantsSchema, default: {} },
+        // Nuevo campo para imágenes
+    images: {
+      type: [ImageSchema],
+      default: [],
+    },
+    products: {
+      type: [ProductVariantSchema],
+      default: [],
+    },
+    discountRanges: {
+      type: [DiscountRangeSchema],
+      default: [],
+    },
 
     // Guardamos payload crudo para auditoría / diffs
     zecatRaw: { type: Schema.Types.Mixed },
@@ -297,6 +366,13 @@ ProductSchema.statics.fromZecatResponse = function fromZecatResponse(payload) {
     metric_system: gp.metric_system,
     variants: normalizeVariants(gp.variants),
     zecatRaw: gp, // trazabilidad
+    families: gp.families,
+    subattributes: gp.subattributes,
+    images: gp.images,
+    products: gp.products,
+    discountPrice: gp.discountPrice,
+    printing_types: gp.printing_types,
+    discountRanges: gp.discountRanges,
   };
 };
 
