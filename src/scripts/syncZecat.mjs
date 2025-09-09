@@ -82,8 +82,6 @@ async function upsertOne(doc) {
 async function main() {
   console.log("🔗 Conectando a Mongo…");
   await connectDB();
-  await Product.collection.dropIndex("external_id_1");
-  await Product.init(); // o syncIndexes()
 
   console.log("🧾 Listando IDs de product…");
   const ids = await listAllGenericIds();

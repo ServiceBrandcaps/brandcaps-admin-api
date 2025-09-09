@@ -231,9 +231,6 @@ ProductSchema.index({ external_id: 1 }, { unique: true, name: "external_id_1" })
 // (sparse permite que otros docs sin 'id' no violen el índice)
 ProductSchema.index({ id: 1 }, { unique: true, sparse: true, name: "id_1" });
 
-// ✅ Opcional: si tu SKU de variante debe ser único globalmente
-ProductSchema.index({ "products.sku": 1 }, { unique: true, sparse: true, name: "products.sku_1" });
-
 ProductSchema.index({ 'variants.colors.sku': 1 });
 ProductSchema.index({ 'variants.sizes.sku': 1 });
 ProductSchema.index({ 'variants.colors.stock': -1 });
