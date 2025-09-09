@@ -4,7 +4,6 @@ const DiscountRangeSchema = new mongoose.Schema(
   { genericId: String, maxPrice: Number, minPrice: Number },
   { _id: false }
 );
-// ... (otras subesquemas como FamilySchema, ImageSchema, etc.)
 
 const ProductVariantSchema = new mongoose.Schema(
   {
@@ -53,6 +52,162 @@ const ProductVariantSchema = new mongoose.Schema(
   { _id: false } // no generes _id para cada variante
 );
 
+const VariantSchema = new mongoose.Schema(
+  {
+    providerId: {
+      // antes "id" en Zecat
+      type: Number,
+      required: false,
+      index: true,
+    },
+    element1: {
+      // "" (puede venir vacío)
+      type: String,
+      default: "",
+      trim: true,
+    },
+    element2: {
+      // "" (puede venir vacío)
+      type: String,
+      default: "",
+      trim: true,
+    },
+    element3: {
+      // "" (puede venir vacío)
+      type: String,
+      default: "",
+      trim: true,
+    },
+    attribute1: {
+      // "" (puede venir vacío)
+      type: String,
+      default: "",
+      trim: true,
+    },
+    attribute2: {
+      // "" (puede venir vacío)
+      type: String,
+      default: "",
+      trim: true,
+    },
+    attribute3: {
+      // "" (puede venir vacío)
+      type: String,
+      default: "",
+      trim: true,
+    },
+    sku: {
+      // "" (puede venir vacío)
+      type: String,
+      default: "",
+      trim: true,
+    },
+    externalProductId: {
+      // "" (puede venir vacío)
+      type: String,
+      default: "",
+      trim: true,
+    },
+    genericProductId: {
+      // "" (puede venir vacío)
+      type: String,
+      default: "",
+      trim: true,
+    },
+    GenericProductId: {
+      // "" (puede venir vacío)
+      type: String,
+      default: "",
+      trim: true,
+    }, // algunas respuestas lo traen capitalizado
+    generalDescription: {
+      // "" (puede venir vacío)
+      type: String,
+      default: "",
+      trim: true,
+    },
+    elementDescription1: {
+      // "" (puede venir vacío)
+      type: String,
+      default: "",
+      trim: true,
+    },
+    elementDescription2: {
+      // "" (puede venir vacío)
+      type: String,
+      default: "",
+      trim: true,
+    },
+    elementDescription3: {
+      // "" (puede venir vacío)
+      type: String,
+      default: "",
+      trim: true,
+    },
+    additionalDescription: {
+      // "" (puede venir vacío)
+      type: String,
+      default: "",
+      trim: true,
+    },
+    stock: {
+      // "" (puede venir vacío)
+      type: String,
+      default: "",
+      trim: true,
+    },
+    reservedStock: {
+      type: Number,
+      set: (v) => (v === "" || v == null ? 0 : Number(v)),
+    },
+    active: { type: Boolean, default: true },
+    achromatic: { type: Boolean, default: false },
+    wepod: { type: Boolean, default: false },
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now },
+    size: {
+      // "" (puede venir vacío)
+      type: String,
+      default: "",
+      trim: true,
+    },
+    color: {
+      // "" (puede venir vacío)
+      type: String,
+      default: "",
+      trim: true,
+    },
+    // primaryColor: String,
+    // secondaryColor: String,
+
+    // attribute_one: { type: AttributeDescriptorSchema, default: undefined },
+    // attribute_two: { type: AttributeDescriptorSchema, default: undefined },
+    // attribute_three: { type: AttributeDescriptorSchema, default: undefined },
+
+    // discountRangeProduct: { type: [DiscountRangeProductSchema], default: [] },
+    // favorites: { type: [Schema.Types.Mixed], default: [] },
+    // images: { type: [ImageSchema], default: [] },
+    // images_wepod: { type: [ImageSchema], default: [] },
+
+    // printing_type_colors_wepod: { type: [PrintingTypeColorSchema], default: [] },
+    // printing_type_colors: { type: [PrintingTypeColorSchema], default: [] },
+
+    // product_stock_arrival: { type: [Schema.Types.Mixed], default: [] },
+    // genericPrintingTypeTemplate: { type: [Schema.Types.Mixed], default: [] },
+  },
+  { _id: false }
+);
+
+const VariantsSchema = new mongoose.Schema(
+  {
+    // La API entrega { colors: { "": [Variant] }, sizes: { "": [Variant] } }
+    // Normalizamos a arrays simples
+    colors: { type: [VariantSchema], default: [] },
+    sizes: { type: [VariantSchema], default: [] },
+  },
+  { _id: false }
+);
+
 // Escalas de precio. Usamos un arreglo flexible: [ { min, max, price } ]
 const PriceTierSchema = new mongoose.Schema(
   {
@@ -81,6 +236,8 @@ const ProductSchema = new mongoose.Schema(
     subattributes: [{ id: Number, name: String, attribute_name: String }],
     images: [{ image_url: String }],
     products: [{ id: Number, sku: String, stock: Number }],
+    // Variantes
+    variants: { type: VariantsSchema, default: {} },
     // Campos para CRUD Front
     marginPercentage: { type: Number, default: 0 },
     frontSection: { type: String, default: "default" },
@@ -121,6 +278,10 @@ const ProductSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// Por si preferís índices fuera de la definición de campos:
+ProductSchema.index({ external_id: 1 }, { unique: true });
+ProductSchema.index({ "products.sku": 1 }, { unique: true, sparse: true });
 
 export default mongoose.models.Product ||
   mongoose.model("Product", ProductSchema);

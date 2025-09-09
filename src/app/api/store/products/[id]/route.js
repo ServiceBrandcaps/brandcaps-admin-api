@@ -46,7 +46,7 @@ export async function GET(_req, context) {
     const projection =
       'name description price marginPercentage families subattributes images frontSection products ' +
       'height width length unit_weight units_per_box packaging supplementary_information_text printing_types ' +
-      'tax minimum_order_quantity external_id priceTiers'
+      'tax minimum_order_quantity external_id priceTiers variants brandcapsProduct'
 
     let doc = null
     if (mongoose.isValidObjectId(id)) {
@@ -71,12 +71,27 @@ export async function GET(_req, context) {
       .map(i => i.image_url || i.url)
       .filter(Boolean)
 
-    const variants = (doc.products || []).map(v => ({
+    const products = (doc.products || []).map(v => ({
       providerId: v.providerId ?? v.id ?? null,
       sku: v.sku,
       stock: Number(v.stock ?? 0),
       size: v.size || '',
       color: v.color || '',
+      achromatic: !!v.achromatic,
+    }))
+
+    const variants = (doc?.variants?.colors || doc?.variants?.sizes || []).map(v => ({
+      providerId: v.providerId ?? v.id ?? null,
+      sku: v.sku,
+      generalDescription: v.generalDescription || '',
+      elementDescription1: v.elementDescription1 || '',
+      elementDescription2: v.elementDescription2 || '',
+      elementDescription3: v.elementDescription3 || '',
+      additionalDescription: v.additionalDescription || '',
+      stock: Number(v.stock ?? 0),
+      size: v.size || '',
+      color: v.color || '',
+      active: v.active || true,
       achromatic: !!v.achromatic,
     }))
 
@@ -115,14 +130,18 @@ export async function GET(_req, context) {
       section: doc.frontSection || null,
       salePrice,
       priceTiers,
-      products: variants,
+      products,
+      variants,
       printing_types,
       dimensions,
       packaging: doc.packaging || '',
+      brandcapsProduct: doc.brandcapsProduct || false,
       units_per_box: doc.units_per_box ?? null,
       supplementary_information_text: doc.supplementary_information_text || '',
       minimum_order_quantity: doc.minimum_order_quantity || 0,
       sku: `${doc.external_id}` || null,
+      basePrice: Number(newBase || 0),
+      tax: Number(tax || 0),
     })
   } catch (err) {
     console.error('STORE PRODUCT DETAIL ERROR:', err)

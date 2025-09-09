@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import mongoose from "mongoose";
 import { connectDB } from "@/lib/mongoose";
 import Product from "@/models/Product";
 import { uploadBufferToCloudinary } from "@/lib/uploads";
@@ -17,7 +18,11 @@ function parseMaybeJSON(val, fallback) {
   if (typeof val === "string") {
     const s = val.trim();
     if (!s) return fallback;
-    try { return JSON.parse(s); } catch { return fallback; }
+    try {
+      return JSON.parse(s);
+    } catch {
+      return fallback;
+    }
   }
   if (val && typeof val === "object") return val;
   return fallback;
@@ -27,10 +32,16 @@ function parseFamilies(input) {
   // Acepta: array objetos, array strings, string "A, B", string JSON '["A","B"]'
   const fromJson = parseMaybeJSON(input, null);
   if (fromJson) {
-    return fromJson.map((f) => (typeof f === "string" ? { description: f } : f));
+    return fromJson.map((f) =>
+      typeof f === "string" ? { description: f } : f
+    );
   }
   if (typeof input === "string") {
-    return input.split(",").map(s => s.trim()).filter(Boolean).map(description => ({ description }));
+    return input
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((description) => ({ description }));
   }
   return [];
 }
@@ -41,7 +52,11 @@ function parseSubattributes(input) {
     return fromJson.map((s) => (typeof s === "string" ? { name: s } : s));
   }
   if (typeof input === "string") {
-    return input.split(",").map(s => s.trim()).filter(Boolean).map(name => ({ name }));
+    return input
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((name) => ({ name }));
   }
   return [];
 }
@@ -49,12 +64,14 @@ function parseSubattributes(input) {
 function normalizeImages(input) {
   // Acepta: array de strings o array de objetos { image_url }/{ url }
   const arr = parseMaybeJSON(input, []);
-  return arr.map((i) => {
-    if (typeof i === "string") return { image_url: i };
-    if (i?.image_url) return { image_url: i.image_url };
-    if (i?.url) return { image_url: i.url };
-    return null;
-  }).filter(Boolean);
+  return arr
+    .map((i) => {
+      if (typeof i === "string") return { image_url: i };
+      if (i?.image_url) return { image_url: i.image_url };
+      if (i?.url) return { image_url: i.url };
+      return null;
+    })
+    .filter(Boolean);
 }
 
 /**
@@ -108,14 +125,17 @@ export async function GET(req) {
  */
 export async function POST(req) {
   await connectDB();
+  await ensureIndexes();
   const contentType = (req.headers.get("content-type") || "").toLowerCase();
+  const idemKey = req.headers.get("x-idempotency-key")?.trim() || null;
 
   if (
     contentType.includes("multipart/form-data") ||
     contentType.includes("application/x-www-form-urlencoded")
   ) {
     const formData = await req.formData();
-    return createFromFormData(formData);
+    //return createFromFormData(formData);
+    return createFromFormData(formData, idemKey);
   }
 
   if (contentType.includes("application/json")) {
@@ -123,7 +143,8 @@ export async function POST(req) {
     if (!body) {
       return NextResponse.json({ error: "JSON body vacío" }, { status: 400 });
     }
-    return createFromJson(body);
+    //return createFromJson(body);
+    return createFromJson(body, idemKey);
   }
 
   return NextResponse.json(
@@ -160,7 +181,7 @@ export async function PATCH(req) {
 
 /* ===================== HELPERS ===================== */
 
-async function createFromFormData(formData) {
+async function createFromFormData(formData, idemKey) {
   const name = formData.get("name")?.toString().trim() ?? "";
   const priceStr = formData.get("price")?.toString() ?? "";
   const marginStr = formData.get("marginPercentage")?.toString() ?? "0";
@@ -173,12 +194,12 @@ async function createFromFormData(formData) {
   // mínimo de pedido (default 20)
   const moq = num(formData.get("minimum_order_quantity"), 20);
   // escalas de precio
-  const p20_100   = num(formData.get("price_20_100"), 0);
+  const p20_100 = num(formData.get("price_20_100"), 0);
   const p100_plus = num(formData.get("price_100_plus"), 0);
   const p500_plus = num(formData.get("price_500_plus"), 0);
 
   const priceTiers = [
-    { min: 20,  max: 100, price: p20_100 },
+    { min: 20, max: 100, price: p20_100 },
     { min: 101, max: 499, price: p100_plus },
     { min: 500, max: null, price: p500_plus },
   ].filter((t) => t.price > 0);
@@ -221,6 +242,22 @@ async function createFromFormData(formData) {
 
   const external_id = generateSku(name);
 
+  const doc = {
+    external_id,
+    name,
+    description,
+    price: Number(priceStr),
+    marginPercentage: Number(marginStr) || 0,
+    frontSection,
+    brandcapsProduct: isBrandcaps,
+    minimum_order_quantity: moq,
+    priceTiers,
+    families,
+    subattributes,
+    images,
+    products: variants,
+  };
+
   if (!name || !priceStr) {
     return NextResponse.json(
       { error: "Nombre y precio son obligatorios" },
@@ -228,36 +265,32 @@ async function createFromFormData(formData) {
     );
   }
 
-  try {
-    const created = await Product.create({
-      external_id,
-      name,
-      description,
-      price: Number(priceStr),
-      marginPercentage: Number(marginStr) || 0,
-      frontSection,
-      brandcapsProduct: isBrandcaps,
-      minimum_order_quantity: moq,
-      priceTiers,
-      families,
-      subattributes,
-      images,
-      products: variants,
-    });
-    return NextResponse.json(created, { status: 201 });
-  } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
-  }
+  // try {
+  //   const created = await Product.create({ ...doc });
+  //   return NextResponse.json(created, { status: 201 });
+  // } catch (err) {
+  //   // Si otro request simultáneo ya lo insertó: devolvemos el existente.
+  //   if (err?.code === 11000) {
+  //     const existing = await Product.findOne({
+  //       external_id: doc.external_id,
+  //     }).lean();
+  //     // 200 está bien para idempotencia; si preferís, podés usar 201 igual.
+  //     return NextResponse.json(existing || {}, { status: 200 });
+  //   }
+  //   return NextResponse.json({ error: err.message }, { status: 500 });
+  // }
+
+  return createOnce(doc, idemKey);
 }
 
-async function createFromJson(body) {
+async function createFromJson(body, idemKey) {
   const {
     name = "",
     price,
     marginPercentage = 0,
     section,
     frontSection: fs,
-    description= "",
+    description = "",
     isBrandcaps = true,
     minimum_order_quantity = 20,
     price_20_100 = 0,
@@ -277,15 +310,15 @@ async function createFromJson(body) {
   }
 
   const priceTiers = [
-    { min: 20,  max: 100, price: price_20_100 },
+    { min: 20, max: 100, price: price_20_100 },
     { min: 101, max: 499, price: price_100_plus },
     { min: 500, max: null, price: price_500_plus },
   ].filter((t) => t.price > 0);
 
-  const families      = parseFamilies(famIn);
+  const families = parseFamilies(famIn);
   const subattributes = parseSubattributes(subIn);
-  const variantsArr   = parseMaybeJSON(variants, []);
-  const imagesNorm    = normalizeImages(images);
+  const variantsArr = parseMaybeJSON(variants, []);
+  const imagesNorm = normalizeImages(images);
 
   const variantsMapped = variantsArr.map((v) => ({
     id: v.id ?? undefined,
@@ -306,30 +339,49 @@ async function createFromJson(body) {
 
   const external_id = generateSku(name);
 
-  try {
-    const created = await Product.create({
-      external_id,
-      name: name.trim(),
-      description,
-      price: Number(price),
-      marginPercentage: Number(marginPercentage) || 0,
-      frontSection: fs ?? section ?? "",
-      brandcapsProduct: !!isBrandcaps,
-      minimum_order_quantity,
-      priceTiers,
-      images: imagesNorm,
-      families,
-      subattributes,
-      products: variantsMapped,
-    });
-    return NextResponse.json(created, { status: 201 });
-  } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
-  }
+  const doc = {
+    external_id,
+    name: name.trim(),
+    description,
+    price: Number(price),
+    marginPercentage: Number(marginPercentage) || 0,
+    frontSection: fs ?? section ?? "",
+    brandcapsProduct: !!isBrandcaps,
+    minimum_order_quantity,
+    priceTiers,
+    images: imagesNorm,
+    families,
+    subattributes,
+    products: variantsMapped,
+  };
+
+  // try {
+  //   const created = await Product.create({ ...doc });
+  //   return NextResponse.json(created, { status: 201 });
+  // } catch (err) {
+  //   // Si otro request simultáneo ya lo insertó: devolvemos el existente.
+  //   if (err?.code === 11000) {
+  //     const existing = await Product.findOne({
+  //       external_id: doc.external_id,
+  //     }).lean();
+  //     // 200 está bien para idempotencia; si preferís, podés usar 201 igual.
+  //     return NextResponse.json(existing || {}, { status: 200 });
+  //   }
+  //   return NextResponse.json({ error: err.message }, { status: 500 });
+  // }
+  return createOnce(doc, idemKey);
 }
 
 async function patchFromJson(body) {
-  const { id, _id, marginPercentage, section, frontSection,description, ...rest } = body;
+  const {
+    id,
+    _id,
+    marginPercentage,
+    section,
+    frontSection,
+    description,
+    ...rest
+  } = body;
   const docId = id || _id;
   if (!docId) {
     return NextResponse.json({ error: "id requerido" }, { status: 400 });
@@ -363,7 +415,7 @@ async function patchFromFormData(formData) {
   const marginStr = formData.get("marginPercentage")?.toString();
   const section = formData.get("section")?.toString();
   const frontSection = formData.get("frontSection")?.toString();
-  const description = formData.get("description")?.toString();  
+  const description = formData.get("description")?.toString();
 
   const familiesStr = formData.get("families")?.toString();
   const subattrsStr = formData.get("subattributes")?.toString();
@@ -424,3 +476,88 @@ async function patchFromFormData(formData) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
+
+/* ====== Idempotencia fuerte + upsert seguro ====== */
+async function createOnce(doc, idemKey) {
+  try {
+    // Si viene clave de idempotencia, la “reservamos” (operación atómica)
+    if (idemKey) {
+      const coll = mongoose.connection.collection("idempotency_keys");
+      const lock = await coll.findOneAndUpdate(
+        { _id: idemKey },
+        { $setOnInsert: { createdAt: new Date() } },
+        { upsert: true, returnDocument: "after" }
+      );
+      const existed = lock?.lastErrorObject?.updatedExisting;
+
+      if (existed) {
+        // Ya hubo otro POST con la misma clave → devolvemos el producto si está
+        const existing =
+          (await Product.findOne({ external_id: doc.external_id }).lean()) ||
+          (lock.value?.productId
+            ? await Product.findById(lock.value.productId).lean()
+            : null);
+
+        if (existing) return NextResponse.json(existing, { status: 200 });
+
+        // Si todavía está “en vuelo”, esperamos un poco
+        for (let i = 0; i < 10; i++) {
+          await new Promise((r) => setTimeout(r, 100));
+          const k = await coll.findOne({ _id: idemKey });
+          if (k?.productId) {
+            const done = await Product.findById(k.productId).lean();
+            if (done) return NextResponse.json(done, { status: 200 });
+          }
+        }
+        return NextResponse.json(
+          { error: "Solicitud duplicada en proceso" },
+          { status: 409 }
+        );
+      }
+
+      // Ganamos la llave → upsert por external_id que siempre devuelve doc
+      const created = await Product.findOneAndUpdate(
+        { external_id: doc.external_id },
+        { $setOnInsert: doc },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      ).lean();
+
+      if (!created) {
+        // Defensa por si algo raro pasó
+        const fallback = await Product.findOne({ external_id: doc.external_id }).lean();
+        if (fallback) {
+          await coll.updateOne({ _id: idemKey }, { $set: { productId: fallback._id } });
+          return NextResponse.json(fallback, { status: 200 });
+        }
+        throw new Error("Upsert no devolvió documento");
+      }
+
+      await coll.updateOne({ _id: idemKey }, { $set: { productId: created._id } });
+      return NextResponse.json(created, { status: 201 });
+    }
+
+    // Sin clave de idempotencia → igual hacemos upsert (dedupe por external_id)
+    const created = await Product.findOneAndUpdate(
+      { external_id: doc.external_id },
+      { $setOnInsert: doc },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    ).lean();
+
+    if (!created) {
+      const fallback = await Product.findOne({ external_id: doc.external_id }).lean();
+      if (fallback) return NextResponse.json(fallback, { status: 200 });
+      throw new Error("Upsert no devolvió documento");
+    }
+
+    return NextResponse.json(created, { status: 201 });
+  } catch (err) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+
+async function ensureIndexes() {
+  try {
+    await Product.collection.createIndex({ external_id: 1 }, { unique: true });
+  } catch (_) {}
+}
+

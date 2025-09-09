@@ -182,14 +182,25 @@ export default function ProductsManager() {
   };
 
   //Crear
-  const handleCreateProduct = async (data) => {
+  const handleCreateProduct = async (createdOrData) => {
+    // Si el modal ya creó el producto (trae _id), NO postear de nuevo:
+    if (createdOrData && createdOrData._id) {
+      setCreateOpen(false);
+      // opcional: refrescar lista
+      // setProducts(prev => [createdOrData, ...prev]); // o:
+      loadProducts();
+      return;
+    }
+    // Fallback por si en algún flujo futuro el modal devuelve datos sin POST:
+    const key = (crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`);
     const res = await fetch("/api/admin/products", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "X-Idempotency-Key": key,
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify(data),
+      body: JSON.stringify(createdOrData),
     });
     if (!res.ok) {
       alert("Error al crear producto");
