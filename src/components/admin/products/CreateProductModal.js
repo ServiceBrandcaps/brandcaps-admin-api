@@ -88,7 +88,16 @@ export default function CreateProductModal({ onClose, onCreate }) {
       // Imágenes
       files.forEach((file) => body.append("images", file, file.name));
 
-      const res = await fetch("/api/admin/products", { method: "POST", body });
+      const key =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random()}`;
+
+      const res = await fetch("/api/admin/products", {
+        method: "POST",
+        headers: { "X-Idempotency-Key": key },
+        body,
+      });
       if (!res.ok) {
         const errText = await res.text().catch(() => "");
         throw new Error(errText || `Error ${res.status}`);

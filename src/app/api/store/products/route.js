@@ -10,6 +10,27 @@ function salePrice(p) {
   return Math.round(newBase * (1 + tax / 100));
 }
 
+function searchMainImage(p) {
+  const product = p;
+  if (!product) return null;
+  //console.log(product);
+  // Normalizamos imágenes: array => ok, string "image" => [{url}], main_image_url => [{url}]
+  const images =
+    (Array.isArray(product.images) &&
+      product.images.length > 0 &&
+      product.images) ||
+    (product.image ? [{ url: product.image }] : null) ||
+    (product.main_image_url ? [{ url: product.main_image_url }] : []);
+
+  // Elegimos la principal
+  const mainImg =
+    images.find?.((i) => i.main_integrator) ||
+    images.find?.((i) => i.main) ||
+    images[0];
+
+  return mainImg
+}
+
 export async function GET(req) {
   await connectDB();
 
@@ -60,7 +81,8 @@ export async function GET(req) {
   const items = docs.map((d) => ({
     _id: d._id,
     name: d.name,
-    image: d.images?.[0]?.image_url || d.images?.[0]?.url || null,
+    image:  searchMainImage(d) ,//d.images?.[0]?.image_url || d.images?.[0]?.url || null,
+    images: d.images || [],
     families: d.families || [],
     subattributes: d.subattributes || [],
     section: d.frontSection || null,
