@@ -1,7 +1,6 @@
 // scripts/syncZecat.js
 // Sincroniza TODOS los campos de TODOS los generic_product usando el modelo Product
 // Estrategia: 1) Lista IDs paginados 2) Trae detalle por ID 3) Upsert en Mongo
-
 import fetch from "node-fetch";
 import { connectDB } from "../lib/mongoose.js";
 import { Product } from "../models/Product.sync.model.js";
