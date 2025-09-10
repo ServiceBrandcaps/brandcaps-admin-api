@@ -201,6 +201,20 @@ const ProductVariantSchema = new mongoose.Schema(
   { _id: false } // no generes _id para cada variante
 );
 
+const PrintingTypesSchema = new Schema(
+  {
+    id: string,
+    name: string,
+    description: string,
+    unit_price: Number,
+    setup_price: Number,
+    code: string,
+    mode: string,
+    active: Boolean,
+    min_units_for_printing: string,
+  }
+)
+
 // ---- Esquema principal ----
 const ProductSchema = new Schema(
   {
@@ -261,7 +275,16 @@ const ProductSchema = new Schema(
     downloadableMaterialUrl: String, // mantener ambas por si viene typo
     supplementary_information_text: String,
     tag: String,
-    printing_types: { type: [String], default: [] }, 
+    printing_types: { type: [PrintingTypesSchema], default: [] }, 
+
+    dimensions: {
+      id: {type: string, default: null},
+      height: { type: Number, default: null }, // Alto
+      width: { type: Number, default: null }, // Ancho
+      length: { type: Number, default: null }, // Largo
+      packagingType: {type: string, default: null},
+      packaging_type_id: {type: string, default: null}
+    },
 
     // Variantes
     variants: { type: VariantsSchema, default: {} },
