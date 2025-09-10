@@ -5,8 +5,8 @@ import Product from "@/models/Product";
 function salePrice(p) {
   const base = Number(p?.price || 0);
   const margin = Number(p?.marginPercentage || 0);
-  const tax = Number(p?.tax || 0)
-  const newBase = Math.round(base * (1 + margin / 100))
+  const tax = Number(p?.tax || 0);
+  const newBase = Math.round(base * (1 + margin / 100));
   return Math.round(newBase * (1 + tax / 100));
 }
 
@@ -28,7 +28,7 @@ function searchMainImage(p) {
     images.find?.((i) => i.main) ||
     images[0];
 
-  return mainImg
+  return mainImg;
 }
 
 export async function GET(req) {
@@ -47,14 +47,14 @@ export async function GET(req) {
   const filters = {};
   if (q) filters.name = new RegExp(q, "i");
   //if (family) filters["families.description"] = new RegExp(family, "i");
-    if (family.length) {
-    const regexes = family.map(f => new RegExp(f, 'i'));
+  if (family.length) {
+    const regexes = family.map((f) => new RegExp(f, "i"));
 
     // Soporta dos formas de guardar familias:
     // - como subdocs: [{ description }]
     // - como array de strings: ["Escritura", ...]
     filters.$or = [
-      { 'families.description': { $in: regexes } },
+      { "families.description": { $in: regexes } },
       { families: { $in: regexes } },
     ];
   }
@@ -72,7 +72,7 @@ export async function GET(req) {
   const total = await Product.countDocuments(filters);
   const docs = await Product.find(filters)
     .select(
-      "name price marginPercentage families subattributes images frontSection products tax"
+      "name price marginPercentage families subattributes images frontSection products tax minimum_order_quantity variants brandcapsProduct"
     )
     .skip(skip)
     .limit(limit)
@@ -81,7 +81,7 @@ export async function GET(req) {
   const items = docs.map((d) => ({
     _id: d._id,
     name: d.name,
-    image:  searchMainImage(d) ,//d.images?.[0]?.image_url || d.images?.[0]?.url || null,
+    image: searchMainImage(d), //d.images?.[0]?.image_url || d.images?.[0]?.url || null,
     images: d.images || [],
     families: d.families || [],
     subattributes: d.subattributes || [],
@@ -96,6 +96,23 @@ export async function GET(req) {
       color: v.color || "",
       achromatic: !!v.achromatic,
     })),
+    minimum_order_quantity: d.minimum_order_quantity,
+    variants: (d?.variants?.colors || d?.variants?.sizes || []).map((v) => ({
+      providerId: v.providerId ?? v.id ?? null,
+      sku: v.sku,
+      generalDescription: v.generalDescription || "",
+      elementDescription1: v.elementDescription1 || "",
+      elementDescription2: v.elementDescription2 || "",
+      elementDescription3: v.elementDescription3 || "",
+      additionalDescription: v.additionalDescription || "",
+      stock: Number(v.stock ?? 0),
+      size: v.size || "",
+      color: v.color || "",
+      active: v.active || true,
+      achromatic: !!v.achromatic,
+    })),
+    tax: d.tax,
+    brandcapsProduct: d.brandcapsProduct || false,
   }));
 
   //console.log(items[0]);
