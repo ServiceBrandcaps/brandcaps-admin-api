@@ -203,15 +203,15 @@ const ProductVariantSchema = new mongoose.Schema(
 
 const PrintingTypesSchema = new Schema(
   {
-    id: string,
-    name: string,
-    description: string,
+    id: String,
+    name: String,
+    description: String,
     unit_price: Number,
     setup_price: Number,
-    code: string,
-    mode: string,
+    code: String,
+    mode: String,
     active: Boolean,
-    min_units_for_printing: string,
+    min_units_for_printing: String,
   }
 )
 
@@ -278,12 +278,12 @@ const ProductSchema = new Schema(
     printing_types: { type: [PrintingTypesSchema], default: [] }, 
 
     dimensions: {
-      id: {type: string, default: null},
+      id: {type: String, default: null},
       height: { type: Number, default: null }, // Alto
       width: { type: Number, default: null }, // Ancho
       length: { type: Number, default: null }, // Largo
-      packagingType: {type: string, default: null},
-      packaging_type_id: {type: string, default: null}
+      packagingType: {type: String, default: null},
+      packaging_type_id: {type: String, default: null}
     },
 
     // Variantes
