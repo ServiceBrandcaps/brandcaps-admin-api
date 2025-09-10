@@ -1,7 +1,7 @@
 // models/Product.js
 // Modelo Mongoose (ESM) para mapear el generic_product de ZECAT + helper fromZecatResponse
 
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 const { Schema } = mongoose;
 
 // ---- Sub-esquemas reutilizables ----
@@ -58,23 +58,14 @@ const DiscountRangeProductSchema = new Schema(
 const ImageSchema = new Schema(
   {
     id: String,
-    imageUrl: String,
-    smallImageUrl: String,
-    mediumImageUrl: String,
-    difaproWordpressSku: String,
-    colorId: { type: Schema.Types.Mixed },
-    main: Boolean,
-    mainIntegrator: Boolean,
-    genericProductId: String,
+    image_url: { type: String, required: true },
+    main: { type: Boolean, default: false },
+    created_at: { type: Date, default: Date.now },
+    small_image_url: String,
+    medium_image_url: String,
+    main_integrator: Boolean,
     generic_product_id: String, // a veces llega en snake
-    productId: String,
-    createdAt: Date,
-    updatedAt: Date,
-    printingAreaId: Schema.Types.Mixed,
-    complementaryWepod: Boolean,
-    coverWepod: Boolean,
-    order: Schema.Types.Mixed,
-    variant: Schema.Types.Mixed,
+    updated_at: Date,
   },
   { _id: false }
 );
@@ -115,7 +106,10 @@ const VariantSchema = new Schema(
     elementDescription3: String,
     additionalDescription: String,
     stock: Number,
-    reservedStock: { type: Number, set: v => (v === '' || v == null ? 0 : Number(v)) },
+    reservedStock: {
+      type: Number,
+      set: (v) => (v === "" || v == null ? 0 : Number(v)),
+    },
     active: Boolean,
     achromatic: Boolean,
     wepod: Boolean,
@@ -135,7 +129,10 @@ const VariantSchema = new Schema(
     images: { type: [ImageSchema], default: [] },
     images_wepod: { type: [ImageSchema], default: [] },
 
-    printing_type_colors_wepod: { type: [PrintingTypeColorSchema], default: [] },
+    printing_type_colors_wepod: {
+      type: [PrintingTypeColorSchema],
+      default: [],
+    },
     printing_type_colors: { type: [PrintingTypeColorSchema], default: [] },
 
     product_stock_arrival: { type: [Schema.Types.Mixed], default: [] },
@@ -201,19 +198,17 @@ const ProductVariantSchema = new mongoose.Schema(
   { _id: false } // no generes _id para cada variante
 );
 
-const PrintingTypesSchema = new Schema(
-  {
-    id: String,
-    name: String,
-    description: String,
-    unit_price: Number,
-    setup_price: Number,
-    code: String,
-    mode: String,
-    active: Boolean,
-    min_units_for_printing: String,
-  }
-)
+const PrintingTypesSchema = new Schema({
+  id: String,
+  name: String,
+  description: String,
+  unit_price: Number,
+  setup_price: Number,
+  code: String,
+  mode: String,
+  active: Boolean,
+  min_units_for_printing: String,
+});
 
 // ---- Esquema principal ----
 const ProductSchema = new Schema(
@@ -275,20 +270,20 @@ const ProductSchema = new Schema(
     downloadableMaterialUrl: String, // mantener ambas por si viene typo
     supplementary_information_text: String,
     tag: String,
-    printing_types: { type: [PrintingTypesSchema], default: [] }, 
+    printing_types: { type: [PrintingTypesSchema], default: [] },
 
     dimensions: {
-      id: {type: String, default: null},
+      id: { type: String, default: null },
       height: { type: Number, default: null }, // Alto
       width: { type: Number, default: null }, // Ancho
       length: { type: Number, default: null }, // Largo
-      packagingType: {type: String, default: null},
-      packaging_type_id: {type: String, default: null}
+      packagingType: { type: String, default: null },
+      packaging_type_id: { type: String, default: null },
     },
 
     // Variantes
     variants: { type: VariantsSchema, default: {} },
-        // Nuevo campo para imágenes
+    // Nuevo campo para imágenes
     images: {
       type: [ImageSchema],
       default: [],
@@ -306,7 +301,7 @@ const ProductSchema = new Schema(
     zecatRaw: { type: Schema.Types.Mixed },
   },
   {
-    collection: 'products',
+    collection: "products",
     timestamps: true,
     minimize: false,
     versionKey: false,
@@ -315,27 +310,31 @@ const ProductSchema = new Schema(
 );
 
 // ---- Índices útiles ----
-ProductSchema.index({ name: 'text', description: 'text', tag: 'text' });
+ProductSchema.index({ name: "text", description: "text", tag: "text" });
 // ✅ Índice único para evitar duplicados del admin
-ProductSchema.index({ external_id: 1 }, { unique: true, name: "external_id_1" });
+ProductSchema.index(
+  { external_id: 1 },
+  { unique: true, name: "external_id_1" }
+);
 
 // ✅ Índice único “sparse” para los docs que vienen de Zecat
 // (sparse permite que otros docs sin 'id' no violen el índice)
 ProductSchema.index({ id: 1 }, { unique: true, sparse: true, name: "id_1" });
 
-ProductSchema.index({ 'variants.colors.sku': 1 });
-ProductSchema.index({ 'variants.sizes.sku': 1 });
-ProductSchema.index({ 'variants.colors.stock': -1 });
+ProductSchema.index({ "variants.colors.sku": 1 });
+ProductSchema.index({ "variants.sizes.sku": 1 });
+ProductSchema.index({ "variants.colors.stock": -1 });
 
 // ---- Helpers ----
 function normalizeVariants(v) {
-  if (!v || typeof v !== 'object') return { colors: [], sizes: [] };
+  if (!v || typeof v !== "object") return { colors: [], sizes: [] };
   const unwrap = (maybeGroup) => {
     if (Array.isArray(maybeGroup)) return maybeGroup;
-    if (maybeGroup && typeof maybeGroup === 'object') {
-      if (Array.isArray(maybeGroup[''])) return maybeGroup['']; // { "": [...] }
+    if (maybeGroup && typeof maybeGroup === "object") {
+      if (Array.isArray(maybeGroup[""])) return maybeGroup[""]; // { "": [...] }
       const firstKey = Object.keys(maybeGroup)[0];
-      if (firstKey && Array.isArray(maybeGroup[firstKey])) return maybeGroup[firstKey];
+      if (firstKey && Array.isArray(maybeGroup[firstKey]))
+        return maybeGroup[firstKey];
     }
     return [];
   };
@@ -348,7 +347,7 @@ function normalizeVariants(v) {
 // Static: construir documento a partir del JSON de la API
 ProductSchema.statics.fromZecatResponse = function fromZecatResponse(payload) {
   if (!payload || !payload.generic_product) {
-    throw new Error('Payload sin product');
+    throw new Error("Payload sin product");
   }
   const gp = payload.generic_product;
 
@@ -409,17 +408,18 @@ ProductSchema.methods.allVariants = function allVariants() {
 };
 
 // Virtual: stock total
-ProductSchema.virtual('totalStock').get(function totalStock() {
+ProductSchema.virtual("totalStock").get(function totalStock() {
   return this.allVariants().reduce((sum, x) => sum + (Number(x.stock) || 0), 0);
 });
 
 // Normalización al validar/guardar
-ProductSchema.pre('validate', function () {
+ProductSchema.pre("validate", function () {
   if (this.variants && (this.variants.colors || this.variants.sizes)) {
     this.variants = normalizeVariants(this.variants);
   }
 });
 
 // ---- Exportaciones (ESM) ----
-export const Product = mongoose.models.Product || mongoose.model('Product', ProductSchema);
+export const Product =
+  mongoose.models.Product || mongoose.model("Product", ProductSchema);
 export default Product;
