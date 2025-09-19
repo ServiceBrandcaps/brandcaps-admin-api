@@ -223,7 +223,16 @@ const ProductSchema = new Schema(
     description_wepod: String,
     type: String,
 
-    families: [{ id: String, description: String }],
+    families: [
+      {
+        id: String,
+        description: String,
+        icon_url: String,
+        icon_active_url: String,
+        title: String,
+        show: Boolean,
+      },
+    ],
     subattributes: [{ id: Number, name: String, attribute_name: String }],
     images: [{ image_url: String }],
     products: [{ id: Number, sku: String, stock: Number }],

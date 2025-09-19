@@ -1,16 +1,21 @@
 "use client";
-import React from "react";
+import React, { useMemo } from "react";
 
-export default function UsersTable({
-  users = [],            // <-- valor por defecto
-  onEditRole = () => {}, // callback cuando clickean “Editar rol”
-}) {
-  if (users.length === 0) {
-    return (
-      <p className="p-4 text-gray-600">
-        No hay usuarios aún.
-      </p>
-    );
+export default function UsersTable({ users, onEditRole = () => {} }) {
+  // 🔒 normalizador a array
+  const rows = useMemo(() => {
+    if (Array.isArray(users)) return users;
+    if (users && typeof users === "object") {
+      if (Array.isArray(users.users)) return users.users;
+      if (Array.isArray(users.data)) return users.data;
+      if (Array.isArray(users.results)) return users.results;
+      if (Array.isArray(users.items)) return users.items;
+    }
+    return [];
+  }, [users]);
+
+  if (rows.length === 0) {
+    return <p className="p-4 text-gray-600">No hay usuarios aún.</p>;
   }
 
   return (
@@ -23,8 +28,8 @@ export default function UsersTable({
         </tr>
       </thead>
       <tbody>
-        {users.map((u) => (
-          <tr key={u._id} className="border-t">
+        {rows.map((u) => (
+          <tr key={u._id || u.id || u.email} className="border-t">
             <td className="p-3">{u.email}</td>
             <td className="p-3">{u.role}</td>
             <td className="p-3 text-center">

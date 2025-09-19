@@ -141,7 +141,7 @@ export async function GET(_req, context) {
       minimum_order_quantity: doc.minimum_order_quantity || 0,
       sku: `${doc.external_id}` || null,
       basePrice: Number(newBase || 0),
-      tax: Number(tax || 0),
+      tax: Number(tax || 21),
     })
   } catch (err) {
     console.error('STORE PRODUCT DETAIL ERROR:', err)
