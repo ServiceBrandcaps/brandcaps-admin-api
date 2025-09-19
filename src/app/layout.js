@@ -1,9 +1,16 @@
 // src/app/layout.js
-"use client";
+//"use client";
 import "../styles/globals.css";
 import { AuthProvider } from "../context/AuthContext";
 import Navbar from "../components/NavBar";
 import Footer from "../components/Footer";
+
+export const metadata = {
+  icons: {
+    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
+    apple: "/apple-touch-icon.png",
+  },
+};
 
 export default function RootLayout({ children }) {
   return (
