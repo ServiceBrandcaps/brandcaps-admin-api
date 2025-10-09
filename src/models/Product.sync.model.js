@@ -141,15 +141,23 @@ const VariantSchema = new Schema(
   { _id: false }
 );
 
-const VariantsSchema = new Schema(
+const VariantsSchema = new mongoose.Schema(
   {
-    // La API entrega { colors: { "": [Variant] }, sizes: { "": [Variant] } }
-    // Normalizamos a arrays simples
     colors: { type: [VariantSchema], default: [] },
     sizes: { type: [VariantSchema], default: [] },
   },
   { _id: false }
 );
+
+// const VariantsSchema = new Schema(
+//   {
+//     // La API entrega { colors: { "": [Variant] }, sizes: { "": [Variant] } }
+//     // Normalizamos a arrays simples
+//     colors: { type: [VariantSchema], default: [] },
+//     sizes: { type: [VariantSchema], default: [] },
+//   },
+//   { _id: false }
+// );
 
 const ProductVariantSchema = new mongoose.Schema(
   {
@@ -235,9 +243,14 @@ const ProductSchema = new Schema(
     ],
     subattributes: [{ id: Number, name: String, attribute_name: String }],
     images: [{ image_url: String }],
-    products: [{ id: Number, sku: String, stock: Number }],
+    // products: [{ id: Number, sku: String, stock: Number }],
     // Variantes
-    variants: { type: VariantsSchema, default: {} },
+    //variants: { type: VariantsSchema, default: {} },
+    variants: {
+      type: VariantsSchema,
+      default: {},
+      set: (v) => normalizeVariants(v || {}),
+    },
 
     // Cantidades mínimas
     minimum_order_quantity: Number,
@@ -291,7 +304,7 @@ const ProductSchema = new Schema(
     },
 
     // Variantes
-    variants: { type: VariantsSchema, default: {} },
+    // variants: { type: VariantsSchema, default: {} },
     // Nuevo campo para imágenes
     images: {
       type: [ImageSchema],
@@ -335,22 +348,46 @@ ProductSchema.index({ "variants.sizes.sku": 1 });
 ProductSchema.index({ "variants.colors.stock": -1 });
 
 // ---- Helpers ----
+// function normalizeVariants(v) {
+//   if (!v || typeof v !== "object") return { colors: [], sizes: [] };
+//   const unwrap = (maybeGroup) => {
+//     if (Array.isArray(maybeGroup)) return maybeGroup;
+//     if (maybeGroup && typeof maybeGroup === "object") {
+//       if (Array.isArray(maybeGroup[""])) return maybeGroup[""]; // { "": [...] }
+//       const firstKey = Object.keys(maybeGroup)[0];
+//       if (firstKey && Array.isArray(maybeGroup[firstKey]))
+//         return maybeGroup[firstKey];
+//     }
+//     return [];
+//   };
+//   return {
+//     colors: unwrap(v.colors),
+//     sizes: unwrap(v.sizes),
+//   };
+// }
+function flattenGroup(group, keyName) {
+  if (!group) return [];
+  // Si ya es array, devuélvelo rellenando el campo por si falta
+  if (Array.isArray(group)) {
+    return group.map((v) => ({ ...v, [keyName]: v?.[keyName] ?? null }));
+  }
+  // Si es objeto: juntar todas las claves (Rojo, Negro, "", XL, etc.)
+  if (typeof group === "object") {
+    return Object.entries(group).flatMap(([bucketKey, arr]) => {
+      if (!Array.isArray(arr)) return [];
+      return arr.map((v) => ({
+        ...v,
+        [keyName]: v?.[keyName] ?? (bucketKey === "" ? null : bucketKey),
+      }));
+    });
+  }
+  return [];
+}
+
 function normalizeVariants(v) {
-  if (!v || typeof v !== "object") return { colors: [], sizes: [] };
-  const unwrap = (maybeGroup) => {
-    if (Array.isArray(maybeGroup)) return maybeGroup;
-    if (maybeGroup && typeof maybeGroup === "object") {
-      if (Array.isArray(maybeGroup[""])) return maybeGroup[""]; // { "": [...] }
-      const firstKey = Object.keys(maybeGroup)[0];
-      if (firstKey && Array.isArray(maybeGroup[firstKey]))
-        return maybeGroup[firstKey];
-    }
-    return [];
-  };
-  return {
-    colors: unwrap(v.colors),
-    sizes: unwrap(v.sizes),
-  };
+  const colors = flattenGroup(v?.colors, "color");
+  const sizes = flattenGroup(v?.sizes, "size");
+  return { colors, sizes };
 }
 
 // Static: construir documento a partir del JSON de la API

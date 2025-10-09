@@ -19,7 +19,10 @@ export default function FilterBar({
   onFilter,
   onClear
 }) {
-  const [name, setName] = useState(filter.name || '')
+    // nameDraft = lo que se tipea, nameApplied = lo que se usa para filtrar
+  const [nameDraft, setNameDraft] = useState(filter.name || '')
+  const [nameApplied, setNameApplied] = useState(filter.name || '')
+  //const [name, setName] = useState(filter.name || '')
   const [family, setFamily] = useState(filter.family || '')
   const [selectedSubattrs, setSelectedSubattrs] = useState(
     filter.subattribute || []
@@ -27,15 +30,33 @@ export default function FilterBar({
 
   // Sincroniza estado local al cambiar prop `filter` (por ejemplo tras un clearFilters)
   useEffect(() => {
-    setName(filter.name || '')
+    //setName(filter.name || '')
+    setNameDraft(filter.name || '')
+    setNameApplied(filter.name || '')
     setFamily(filter.family || '')
     setSelectedSubattrs(filter.subattribute || [])
   }, [filter])
 
   // Llama a onFilter sólo cuando cambie cualquiera de los 3 valores
   useEffect(() => {
-    onFilter({ name, family, subattribute: selectedSubattrs })
-  }, [name, family, selectedSubattrs, onFilter])
+    onFilter({  name: nameApplied, family, subattribute: selectedSubattrs })
+  }, [nameApplied, family, selectedSubattrs, onFilter])
+
+    const commitName = () => {
+    if ((nameDraft || '') !== (nameApplied || '')) {
+      setNameApplied(nameDraft)
+    }
+  }
+
+  const handleNameKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      commitName()
+    } else if (e.key === 'Tab') {
+      // no prevenimos tab: dejamos que cambie el foco
+      commitName()
+    }
+  }
 
   const handleClear = () => {
     onClear()
@@ -50,8 +71,10 @@ export default function FilterBar({
         <label className="text-sm mb-1">Buscar nombre</label>
         <input
           type="text"
-          value={name}
-          onChange={e => setName(e.target.value)}
+          value={nameDraft}
+          onChange={e => setNameDraft(e.target.value)}
+          onKeyDown={handleNameKeyDown}
+          onBlur={commitName}
           placeholder="Buscar nombre"
           className="border p-2 rounded w-64"
         />
