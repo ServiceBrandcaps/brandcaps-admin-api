@@ -208,6 +208,7 @@ async function createFromFormData(formData, idemKey) {
   const variantsInput = formData.get("variants") || "[]";
   const variantsIn = parseMaybeJSON(variantsInput, []);
   const variants = variantsIn.map((v) => ({
+    idDataverse: v.idDataverse || "",
     id: v.id ?? undefined,
     sku:
       v.sku ||
@@ -321,6 +322,7 @@ async function createFromJson(body, idemKey) {
   const imagesNorm = normalizeImages(images);
 
   const variantsMapped = variantsArr.map((v) => ({
+    idDataverse: v.idDataverse || "",
     id: v.id ?? undefined,
     sku:
       v.sku ||
@@ -373,38 +375,66 @@ async function createFromJson(body, idemKey) {
 }
 
 async function patchFromJson(body) {
-  const {
-    id,
-    _id,
-    marginPercentage,
-    section,
-    frontSection,
-    description,
-    ...rest
-  } = body;
+  const { id, _id, marginPercentage, section, frontSection, description, ...rest } = body;
   const docId = id || _id;
-  if (!docId) {
-    return NextResponse.json({ error: "id requerido" }, { status: 400 });
-  }
+  if (!docId) return NextResponse.json({ error: "id requerido" }, { status: 400 });
 
-  const update = { ...rest };
-  if (marginPercentage !== undefined)
-    update.marginPercentage = Number(marginPercentage);
+  // campos "simples"
+  const update = {};
+  if (marginPercentage !== undefined) update.marginPercentage = Number(marginPercentage);
   if (frontSection !== undefined) update.frontSection = frontSection;
   if (section !== undefined) update.frontSection = section;
   if (description !== undefined) update.description = description;
 
-  try {
-    const updated = await Product.findByIdAndUpdate(docId, update, {
-      new: true,
-    }).lean();
-    if (!updated)
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
-    return NextResponse.json(updated);
-  } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  // 1) aplico primero los campos simples
+  if (Object.keys(update).length) {
+    await Product.findByIdAndUpdate(docId, update, { new: false, runValidators: true });
   }
+
+  // 2) si llegan variantes, MERGE por sku (no reemplazo el array)
+  if (Array.isArray(rest.products)) {
+    const incoming = rest.products.map((v) => ({
+      sku: v.sku || v.SKU || "",                // clave de empareje
+      idDataverse: v.idDataverse ?? "",
+      color: v.color ?? "",
+      size: v.size ?? "",
+      material: v.material ?? "",
+      stock: Number(v.stock ?? 0),
+      achromatic: !!v.achromatic,
+    }));
+
+    const doc = await Product.findById(docId);
+    if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+    const bySku = new Map((doc.products || []).map((vv) => [vv.sku, vv]));
+    for (const nv of incoming) {
+      if (!nv.sku) continue; // sin sku no puedo matchear
+      const cur = bySku.get(nv.sku);
+      if (cur) {
+        // ✅ acá no se pierde nada: solo actualizo campos
+        cur.idDataverse = nv.idDataverse;
+        cur.color = nv.color;
+        cur.size = nv.size;
+        cur.material = nv.material;
+        cur.stock = nv.stock;
+        cur.achromatic = nv.achromatic;
+      } else {
+        // variante nueva
+        doc.products.push(nv);
+      }
+    }
+
+    await doc.save(); // usa el schema (ProductVariantSchema) y persiste idDataverse
+    const fresh = await Product.findById(docId).lean();
+    //console.log("DBG products[0] >>", fresh?.products?.[0]);
+    return NextResponse.json(fresh);
+  }
+
+  // 3) si no hubo variantes en el PATCH, devuelvo el doc actualizado
+  const updated = await Product.findById(docId).lean();
+  return NextResponse.json(updated);
 }
+
 
 async function patchFromFormData(formData) {
   const id = formData.get("id")?.toString();
@@ -450,7 +480,7 @@ async function patchFromFormData(formData) {
 
   try {
     let updated = await Product.findByIdAndUpdate(id, update, {
-      new: true,
+      new: true, runValidators: true
     }).lean();
     if (!updated)
       return NextResponse.json({ error: "Not found" }, { status: 404 });

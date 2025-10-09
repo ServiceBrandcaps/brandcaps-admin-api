@@ -1,5 +1,30 @@
 import mongoose from "mongoose";
 
+function flattenGroup(group, keyName) {
+  if (!group) return [];
+  // Si ya es array, devuélvelo rellenando el campo por si falta
+  if (Array.isArray(group)) {
+    return group.map((v) => ({ ...v, [keyName]: v?.[keyName] ?? null }));
+  }
+  // Si es objeto: juntar todas las claves (Rojo, Negro, "", XL, etc.)
+  if (typeof group === "object") {
+    return Object.entries(group).flatMap(([bucketKey, arr]) => {
+      if (!Array.isArray(arr)) return [];
+      return arr.map((v) => ({
+        ...v,
+        [keyName]: v?.[keyName] ?? (bucketKey === "" ? null : bucketKey),
+      }));
+    });
+  }
+  return [];
+}
+
+function normalizeVariants(v) {
+  const colors = flattenGroup(v?.colors, "color");
+  const sizes = flattenGroup(v?.sizes, "size");
+  return { colors, sizes };
+}
+
 const DiscountRangeSchema = new mongoose.Schema(
   { genericId: String, maxPrice: Number, minPrice: Number },
   { _id: false }
@@ -7,6 +32,12 @@ const DiscountRangeSchema = new mongoose.Schema(
 
 const ProductVariantSchema = new mongoose.Schema(
   {
+    idDataverse: {
+      // "" (puede venir vacío)
+      type: String,
+      default: "",
+      trim: true,
+    },
     providerId: {
       // antes "id" en Zecat
       type: Number,
@@ -177,6 +208,12 @@ const VariantSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    idDataverse: {
+      // "" (puede venir vacío)
+      type: String,
+      default: "",
+      trim: true,
+    },
     // primaryColor: String,
     // secondaryColor: String,
 
@@ -200,8 +237,6 @@ const VariantSchema = new mongoose.Schema(
 
 const VariantsSchema = new mongoose.Schema(
   {
-    // La API entrega { colors: { "": [Variant] }, sizes: { "": [Variant] } }
-    // Normalizamos a arrays simples
     colors: { type: [VariantSchema], default: [] },
     sizes: { type: [VariantSchema], default: [] },
   },
@@ -243,10 +278,21 @@ const ProductSchema = new mongoose.Schema(
       },
     ],
     subattributes: [{ id: Number, name: String, attribute_name: String }],
-    images: [{ image_url: String }],
-    products: [{ id: Number, sku: String, stock: Number }],
+    // images: [{ image_url: String }],
+    // products: [
+    //   {
+    //     id: Number,
+    //     sku: String,
+    //     stock: Number,
+    //   },
+    // ],
     // Variantes
-    variants: { type: VariantsSchema, default: {} },
+    //variants: { type: VariantsSchema, default: {} },
+    variants: {
+      type: VariantsSchema,
+      default: {},
+      set: (v) => normalizeVariants(v || {}),
+    },
     // Campos para CRUD Front
     marginPercentage: { type: Number, default: 0 },
     frontSection: { type: String, default: "default" },
@@ -281,7 +327,7 @@ const ProductSchema = new mongoose.Schema(
     units_per_box: { type: Number, default: null }, // Unidades por caja
     supplementary_information_text: { type: String, default: "" }, // Información complementaria
     minimum_order_quantity: { type: Number, default: 20 },
-    external_id: { type: String, default: null },
+    // external_id: { type: String, default: null },
     // NUEVO: escalas de precio
     priceTiers: { type: [PriceTierSchema], default: [] },
   },
@@ -303,6 +349,12 @@ ProductSchema.index(
   { "products.sku": 1 },
   { unique: true, sparse: true, name: "products.sku_1" }
 );
+
+// ⚠️ Forzar recompilación del modelo en hot-reload:
+if (mongoose.models.Product) {
+  delete mongoose.models.Product; // (Mongoose < 7)
+  // en Mongoose 7 también sirve: mongoose.deleteModel('Product');
+}
 
 export default mongoose.models.Product ||
   mongoose.model("Product", ProductSchema);

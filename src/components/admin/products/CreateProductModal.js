@@ -20,7 +20,7 @@ export default function CreateProductModal({ onClose, onCreate }) {
 
   // Variantes (sin SKU: color/material/size/stock)
   const [variants, setVariants] = useState([
-    { color: "", material: "", size: "", stock: "" },
+    { idDataverse:"", color: "", material: "", size: "", stock: "" },
   ]);
 
   // Imágenes
@@ -40,7 +40,7 @@ export default function CreateProductModal({ onClose, onCreate }) {
   const addVariant = () =>
     setVariants((v) => [
       ...v,
-      { color: "", material: "", size: "", stock: "" },
+      {  idDataverse:"", color: "", material: "", size: "", stock: "" },
     ]);
 
   const removeVariant = (idx) =>
@@ -78,6 +78,8 @@ export default function CreateProductModal({ onClose, onCreate }) {
 
       // Variantes SIN sku
       const payloadVariants = variants.map((v) => ({
+        sku: v.sku,
+        idDataverse: v.idDataverse || "",
         color: v.color || "",
         material: v.material || "",
         size: v.size || "",
@@ -313,9 +315,10 @@ export default function CreateProductModal({ onClose, onCreate }) {
 
             {/* Header Desktop */}
             <div className="hidden md:grid grid-cols-12 gap-2 p-2 text-sm font-medium bg-gray-50 rounded">
+              <div className="col-span-2">Id system</div>
               <div className="col-span-3">Color</div>
               <div className="col-span-3">Material</div>
-              <div className="col-span-4">Talle / Medida</div>
+              <div className="col-span-2">Talle / Medida</div>
               <div className="col-span-2 text-center">Stock</div>
             </div>
 
@@ -325,6 +328,20 @@ export default function CreateProductModal({ onClose, onCreate }) {
                 key={idx}
                 className="grid grid-cols-1 md:grid-cols-12 gap-2 p-3 border rounded md:border-0 md:border-t"
               >
+                {/* ID */}
+                <div className="md:col-span-2">
+                  <label className="md:hidden text-xs text-gray-600">
+                    Id system
+                  </label>
+                  <input
+                    className="w-full border rounded p-2"
+                    placeholder="ID-01879"
+                    value={v.idDataverse}
+                    onChange={(e) =>
+                      updateVariant(idx, "idDataverse", e.target.value)
+                    }
+                  />
+                </div>
                 {/* Color */}
                 <div className="md:col-span-3">
                   <label className="md:hidden text-xs text-gray-600">
@@ -354,7 +371,7 @@ export default function CreateProductModal({ onClose, onCreate }) {
                   />
                 </div>
                 {/* Size */}
-                <div className="md:col-span-4">
+                <div className="md:col-span-2">
                   <label className="md:hidden text-xs text-gray-600">
                     Talle / Medida
                   </label>
