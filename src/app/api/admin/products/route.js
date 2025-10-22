@@ -7,6 +7,43 @@ import { generateSku } from "@/lib/sku";
 
 export const runtime = "nodejs";
 
+const norm = (s = "") =>
+  s
+    .toString()
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+const slug = (s = "") =>
+  norm(s)
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+function buildVarSku(product, v, idx) {
+  const base =
+    product.sku || product.external_id || String(product._id || "prd");
+  const parts = [
+    slug(v.color || ""),
+    slug(v.material || ""),
+    slug(v.size || ""),
+  ].filter(Boolean);
+  let draft = `${base}${parts.length ? "-" + parts.join("-") : ""}`;
+  if (!parts.length) draft = `${base}-var-${idx + 1}`;
+  return draft.toUpperCase();
+}
+
+function ensureVariantSkus(productDoc) {
+  const seen = new Set();
+  (productDoc.products || []).forEach((v, i) => {
+    if (!v.sku || !v.sku.trim()) v.sku = buildVarSku(productDoc, v, i);
+    let cand = v.sku,
+      k = 1;
+    while (seen.has(cand)) cand = `${v.sku}-${++k}`;
+    v.sku = cand;
+    seen.add(cand);
+  });
+}
+
 function num(v, d = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : d;
@@ -375,26 +412,38 @@ async function createFromJson(body, idemKey) {
 }
 
 async function patchFromJson(body) {
-  const { id, _id, marginPercentage, section, frontSection, description, ...rest } = body;
+  const {
+    id,
+    _id,
+    marginPercentage,
+    section,
+    frontSection,
+    description,
+    ...rest
+  } = body;
   const docId = id || _id;
-  if (!docId) return NextResponse.json({ error: "id requerido" }, { status: 400 });
+  if (!docId)
+    return NextResponse.json({ error: "id requerido" }, { status: 400 });
 
-  // campos "simples"
+  // 1) actualizar campos simples
   const update = {};
-  if (marginPercentage !== undefined) update.marginPercentage = Number(marginPercentage);
+  if (marginPercentage !== undefined)
+    update.marginPercentage = Number(marginPercentage);
   if (frontSection !== undefined) update.frontSection = frontSection;
   if (section !== undefined) update.frontSection = section;
   if (description !== undefined) update.description = description;
 
-  // 1) aplico primero los campos simples
   if (Object.keys(update).length) {
-    await Product.findByIdAndUpdate(docId, update, { new: false, runValidators: true });
+    await Product.findByIdAndUpdate(docId, update, {
+      new: false,
+      runValidators: true,
+    });
   }
 
-  // 2) si llegan variantes, MERGE por sku (no reemplazo el array)
+  // 2) mergear variantes por sku (y generar sku si falta)
   if (Array.isArray(rest.products)) {
     const incoming = rest.products.map((v) => ({
-      sku: v.sku || v.SKU || "",                // clave de empareje
+      sku: v.sku || v.SKU || "", // puede venir vacío (lo generamos)
       idDataverse: v.idDataverse ?? "",
       color: v.color ?? "",
       size: v.size ?? "",
@@ -406,35 +455,27 @@ async function patchFromJson(body) {
     const doc = await Product.findById(docId);
     if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    const bySku = new Map((doc.products || []).map((vv) => [vv.sku, vv]));
+    // merge por sku; si está vacío, lo agregamos igual y luego generamos sku
+    const bySku = new Map((doc.products || []).map((v) => [v.sku, v]));
     for (const nv of incoming) {
-      if (!nv.sku) continue; // sin sku no puedo matchear
-      const cur = bySku.get(nv.sku);
-      if (cur) {
-        // ✅ acá no se pierde nada: solo actualizo campos
-        cur.idDataverse = nv.idDataverse;
-        cur.color = nv.color;
-        cur.size = nv.size;
-        cur.material = nv.material;
-        cur.stock = nv.stock;
-        cur.achromatic = nv.achromatic;
+      if (nv.sku && bySku.has(nv.sku)) {
+        Object.assign(bySku.get(nv.sku), nv);
       } else {
-        // variante nueva
-        doc.products.push(nv);
+        doc.products.push(nv); // nueva o “sin sku” (se completará más abajo)
       }
     }
 
-    await doc.save(); // usa el schema (ProductVariantSchema) y persiste idDataverse
+    // genera sku faltantes y deduplica, luego guarda
+    ensureVariantSkus(doc);
+    await doc.save();
     const fresh = await Product.findById(docId).lean();
-    //console.log("DBG products[0] >>", fresh?.products?.[0]);
     return NextResponse.json(fresh);
   }
 
-  // 3) si no hubo variantes en el PATCH, devuelvo el doc actualizado
+  // 3) sin variantes en el body -> devuelve doc actualizado
   const updated = await Product.findById(docId).lean();
   return NextResponse.json(updated);
 }
-
 
 async function patchFromFormData(formData) {
   const id = formData.get("id")?.toString();
@@ -480,7 +521,8 @@ async function patchFromFormData(formData) {
 
   try {
     let updated = await Product.findByIdAndUpdate(id, update, {
-      new: true, runValidators: true
+      new: true,
+      runValidators: true,
     }).lean();
     if (!updated)
       return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -554,15 +596,23 @@ async function createOnce(doc, idemKey) {
 
       if (!created) {
         // Defensa por si algo raro pasó
-        const fallback = await Product.findOne({ external_id: doc.external_id }).lean();
+        const fallback = await Product.findOne({
+          external_id: doc.external_id,
+        }).lean();
         if (fallback) {
-          await coll.updateOne({ _id: idemKey }, { $set: { productId: fallback._id } });
+          await coll.updateOne(
+            { _id: idemKey },
+            { $set: { productId: fallback._id } }
+          );
           return NextResponse.json(fallback, { status: 200 });
         }
         throw new Error("Upsert no devolvió documento");
       }
 
-      await coll.updateOne({ _id: idemKey }, { $set: { productId: created._id } });
+      await coll.updateOne(
+        { _id: idemKey },
+        { $set: { productId: created._id } }
+      );
       return NextResponse.json(created, { status: 201 });
     }
 
@@ -574,7 +624,9 @@ async function createOnce(doc, idemKey) {
     ).lean();
 
     if (!created) {
-      const fallback = await Product.findOne({ external_id: doc.external_id }).lean();
+      const fallback = await Product.findOne({
+        external_id: doc.external_id,
+      }).lean();
       if (fallback) return NextResponse.json(fallback, { status: 200 });
       throw new Error("Upsert no devolvió documento");
     }
@@ -590,4 +642,3 @@ async function ensureIndexes() {
     await Product.collection.createIndex({ external_id: 1 }, { unique: true });
   } catch (_) {}
 }
-
