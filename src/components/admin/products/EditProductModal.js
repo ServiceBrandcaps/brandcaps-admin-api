@@ -7,18 +7,27 @@ export default function EditProductModal({ product, onClose, onSave }) {
 
   // ===== Helpers de prefill =====
   const tier = (min, max) =>
-    (product?.priceTiers || []).find((t) => t.min === min && t.max === max)?.price ?? "";
+    (product?.priceTiers || []).find((t) => t.min === min && t.max === max)
+      ?.price ?? "";
 
   const tier20_100 = useMemo(() => tier(20, 100), [product]);
   const tier100_plus = useMemo(() => tier(101, 499), [product]);
   const tier500_plus = useMemo(() => tier(500, null), [product]);
 
   const familiesPrefill = useMemo(
-    () => (product?.families || []).map((f) => f?.description).filter(Boolean).join(", "),
+    () =>
+      (product?.families || [])
+        .map((f) => f?.description)
+        .filter(Boolean)
+        .join(", "),
     [product]
   );
   const subattrsPrefill = useMemo(
-    () => (product?.subattributes || []).map((s) => s?.name).filter(Boolean).join(", "),
+    () =>
+      (product?.subattributes || [])
+        .map((s) => s?.name)
+        .filter(Boolean)
+        .join(", "),
     [product]
   );
   const variantsPrefill = useMemo(
@@ -40,7 +49,9 @@ export default function EditProductModal({ product, onClose, onSave }) {
   const [section, setSection] = useState(product?.frontSection || "");
   const [description, setDescription] = useState(product?.description || "");
   const [isBrandcapsFlag] = useState(true); // fijo en edición Brandcaps
-  const [marginPercentage, setMarginPercentage] = useState(product?.marginPercentage ?? "");
+  const [marginPercentage, setMarginPercentage] = useState(
+    product?.marginPercentage ?? ""
+  );
 
   const [families, setFamilies] = useState(familiesPrefill);
   const [subattributes, setSubattributes] = useState(subattrsPrefill);
@@ -52,9 +63,10 @@ export default function EditProductModal({ product, onClose, onSave }) {
   const [price100_plus, setPrice100_plus] = useState(tier100_plus || "");
   const [price500_plus, setPrice500_plus] = useState(tier500_plus || "");
 
-  const [variants, setVariants] = useState(
-    variantsPrefill.length ? variantsPrefill : [{  idDataverse:"", color: "", material: "", size: "", stock: "" }]
-  );
+  const [variants, setVariants] = useState(variantsPrefill);
+  //variantsPrefill.length ? variantsPrefill : [{  idDataverse:"", color: "", material: "", size: "", stock: "" }]
+  const [dirty, setDirty] = useState({}); // { [sku]: true }
+  const dirtySkus = useMemo(() => Object.keys(dirty).filter(Boolean), [dirty]);
 
   const [files, setFiles] = useState([]);
   const [replaceImages, setReplaceImages] = useState(false);
@@ -65,7 +77,7 @@ export default function EditProductModal({ product, onClose, onSave }) {
     setName(product?.name || "");
     setPrice(product?.price ?? "");
     setSection(product?.frontSection || "");
-    setDescription(product?.description || "");    
+    setDescription(product?.description || "");
     setMarginPercentage(product?.marginPercentage ?? "");
     setFamilies(familiesPrefill);
     setSubattributes(subattrsPrefill);
@@ -73,7 +85,8 @@ export default function EditProductModal({ product, onClose, onSave }) {
     setPrice20_100(tier20_100 || "");
     setPrice100_plus(tier100_plus || "");
     setPrice500_plus(tier500_plus || "");
-    setVariants(variantsPrefill.length ? variantsPrefill : [{  idDataverse:"", color: "", material: "", size: "", stock: "" }]);
+    setVariants(variantsPrefill);
+    setDirty({});
     setFiles([]);
     setReplaceImages(false);
   }, [product]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -89,35 +102,54 @@ export default function EditProductModal({ product, onClose, onSave }) {
   const handleFileChange = (e) => setFiles(Array.from(e.target.files || []));
 
   const addVariant = () =>
-    setVariants((v) => [...v, {  idDataverse:"", color: "", material: "", size: "", stock: "" }]);
+    setVariants((v) => [
+      ...v,
+      { idDataverse: "", color: "", material: "", size: "", stock: "" },
+    ]);
 
   const removeVariant = (idx) =>
     setVariants((v) => v.filter((_, i) => i !== idx));
 
-  const updateVariant = (idx, field, value) => {
+  const updateVariant = (idx, field, value, row) => {
     setVariants((prev) => {
       const copy = [...prev];
       copy[idx] = { ...copy[idx], [field]: value };
       return copy;
     });
+    setDirty((prev) => ({ ...prev, [row.sku]: true })); // <- marca dirty ya
   };
 
   // ====== SUBMIT (dos pasos si hay imágenes) ======
   const submitJsonPatch = async () => {
     // armo priceTiers como en Create
     const priceTiers = [
-      price20_100 ? { min: 20,  max: 100, price: Number(price20_100) } : null,
-      price100_plus ? { min: 101, max: 499, price: Number(price100_plus) } : null,
-      price500_plus ? { min: 500, max: null, price: Number(price500_plus) } : null,
+      price20_100 ? { min: 20, max: 100, price: Number(price20_100) } : null,
+      price100_plus
+        ? { min: 101, max: 499, price: Number(price100_plus) }
+        : null,
+      price500_plus
+        ? { min: 500, max: null, price: Number(price500_plus) }
+        : null,
     ].filter(Boolean);
 
+    // const payloadVariants = variants.map((v) => ({
+    //   sku: v?.sku || "",
+    //   idDataverse: v.idDataverse || "",
+    //   color: v.color || "",
+    //   material: v.material || "",
+    //   size: v.size || "",
+    //   stock: Number(v.stock || 0),
+    // }));
+
+    // 👉 incluimos TODAS las variedades con su sku (clave de merge)
     const payloadVariants = variants.map((v) => ({
-      sku: v?.sku || "",
+      sku: v?.sku || "", // ¡no lo omitas!
       idDataverse: v.idDataverse || "",
       color: v.color || "",
       material: v.material || "",
       size: v.size || "",
       stock: Number(v.stock || 0),
+      achromatic: !!v.achromatic,
     }));
 
     const body = {
@@ -128,10 +160,18 @@ export default function EditProductModal({ product, onClose, onSave }) {
       section, // backend lo mapea a frontSection
       description,
       families: families
-        ? families.split(",").map((s) => s.trim()).filter(Boolean).map((description) => ({ description }))
+        ? families
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .map((description) => ({ description }))
         : [],
       subattributes: subattributes
-        ? subattributes.split(",").map((s) => s.trim()).filter(Boolean).map((name) => ({ name }))
+        ? subattributes
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .map((name) => ({ name }))
         : [],
       minimum_order_quantity: Number(minimumOrder || 20),
       priceTiers,
@@ -154,7 +194,10 @@ export default function EditProductModal({ product, onClose, onSave }) {
     fd.append("id", product._id);
     fd.append("replaceImages", replaceImages ? "true" : "false");
     files.forEach((f) => fd.append("images", f, f.name));
-    const res = await fetch("/api/admin/products", { method: "PATCH", body: fd });
+    const res = await fetch("/api/admin/products", {
+      method: "PATCH",
+      body: fd,
+    });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   };
@@ -166,15 +209,21 @@ export default function EditProductModal({ product, onClose, onSave }) {
     setSaving(true);
     try {
       // 1) actualizo todos los campos por JSON (incluye tiers, variantes, mínimos, etc.)
-      const updated1 = await submitJsonPatch();
+      const updated = await submitJsonPatch();
 
       // 2) si hay imágenes, hago un segundo PATCH multipart para reemplazar/adjuntar
-      let updatedFinal = updated1;
+      // let updatedFinal = updated1;
+      // if (files.length) {
+      //   updatedFinal = await submitImagesPatch();
+      // }
+      // Imágenes, si hay:
+      let finalDoc = updated;
       if (files.length) {
-        updatedFinal = await submitImagesPatch();
+        const img = await submitImagesPatch();
+        finalDoc = img || updated;
       }
 
-      onSave?.(updatedFinal || updated1);
+      onSave?.(finalDoc);
       onClose?.();
     } catch (err) {
       console.error(err);
@@ -193,7 +242,11 @@ export default function EditProductModal({ product, onClose, onSave }) {
             e.preventDefault();
             setSaving(true);
             Promise.resolve(
-              onSave?.({ _id: product._id, marginPercentage, frontSection: section })
+              onSave?.({
+                _id: product._id,
+                marginPercentage,
+                frontSection: section,
+              })
             )
               .then(() => onClose?.())
               .catch(() => alert("No se pudo actualizar"))
@@ -203,7 +256,11 @@ export default function EditProductModal({ product, onClose, onSave }) {
         >
           <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold">Editar {product?.name}</h2>
-            <button type="button" onClick={onClose} className="px-3 py-1.5 rounded bg-gray-200 hover:bg-gray-300">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-3 py-1.5 rounded bg-gray-200 hover:bg-gray-300"
+            >
               X
             </button>
           </div>
@@ -322,7 +379,9 @@ export default function EditProductModal({ product, onClose, onSave }) {
             <label className="block">
               <span className="text-sm font-medium">
                 Precio base (opcional){" "}
-                <span className="text-gray-500">(si está vacío usamos 20–100)</span>
+                <span className="text-gray-500">
+                  (si está vacío usamos 20–100)
+                </span>
               </span>
               <input
                 type="number"
@@ -344,10 +403,12 @@ export default function EditProductModal({ product, onClose, onSave }) {
               </div>
             </label>
           </div>
-                    {/* Descripción – NUEVO */}
+          {/* Descripción – NUEVO */}
           <div>
             <label className="block">
-              <span className="text-sm font-medium">Descripción del producto</span>
+              <span className="text-sm font-medium">
+                Descripción del producto
+              </span>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
@@ -402,7 +463,9 @@ export default function EditProductModal({ product, onClose, onSave }) {
           {/* Families & Subattributes */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <label className="block">
-              <span className="text-sm font-medium">Families (coma-separadas)</span>
+              <span className="text-sm font-medium">
+                Families (coma-separadas)
+              </span>
               <input
                 type="text"
                 value={families}
@@ -412,7 +475,9 @@ export default function EditProductModal({ product, onClose, onSave }) {
               />
             </label>
             <label className="block">
-              <span className="text-sm font-medium">Subatributos (coma-separados)</span>
+              <span className="text-sm font-medium">
+                Subatributos (coma-separados)
+              </span>
               <input
                 type="text"
                 value={subattributes}
@@ -449,51 +514,71 @@ export default function EditProductModal({ product, onClose, onSave }) {
                 key={idx}
                 className="grid grid-cols-1 md:grid-cols-12 gap-2 p-3 border rounded md:border-0 md:border-t"
               >
-              <div className="md:col-span-2">
-                  <label className="md:hidden text-xs text-gray-600">Id system</label>
+                <div className="md:col-span-2">
+                  <label className="md:hidden text-xs text-gray-600">
+                    Id system
+                  </label>
                   <input
                     className="w-full border rounded p-2"
                     placeholder="ID-1879"
                     value={v.idDataverse}
-                    onChange={(e) => updateVariant(idx, "idDataverse", e.target.value)}
+                    onChange={(e) =>
+                      updateVariant(idx, "idDataverse", e.target.value, v)
+                    }
                   />
                 </div>
                 <div className="md:col-span-3">
-                  <label className="md:hidden text-xs text-gray-600">Color</label>
+                  <label className="md:hidden text-xs text-gray-600">
+                    Color
+                  </label>
                   <input
                     className="w-full border rounded p-2"
                     placeholder="Azul / Negro…"
                     value={v.color}
-                    onChange={(e) => updateVariant(idx, "color", e.target.value)}
+                    onChange={(e) =>
+                      updateVariant(idx, "color", e.target.value, v)
+                    }
                   />
                 </div>
                 <div className="md:col-span-3">
-                  <label className="md:hidden text-xs text-gray-600">Material</label>
+                  <label className="md:hidden text-xs text-gray-600">
+                    Material
+                  </label>
                   <input
                     className="w-full border rounded p-2"
                     placeholder="Algodón / Metal…"
                     value={v.material}
-                    onChange={(e) => updateVariant(idx, "material", e.target.value)}
+                    onChange={(e) =>
+                      updateVariant(idx, "material", e.target.value, v)
+                    }
                   />
                 </div>
                 <div className="md:col-span-2">
-                  <label className="md:hidden text-xs text-gray-600">Talle / Medida</label>
+                  <label className="md:hidden text-xs text-gray-600">
+                    Talle / Medida
+                  </label>
                   <input
                     className="w-full border rounded p-2"
                     placeholder="M / 30x20…"
                     value={v.size}
-                    onChange={(e) => updateVariant(idx, "size", e.target.value)}
+                    onChange={(e) =>
+                      updateVariant(idx, "size", e.target.value, v)
+                    }
                   />
                 </div>
                 <div className="md:col-span-2">
-                  <label className="md:hidden text-xs text-gray-600">Stock</label>
+                  <label className="md:hidden text-xs text-gray-600">
+                    Stock
+                  </label>
                   <input
                     type="number"
                     className="w-full border rounded p-2 text-center"
                     placeholder="0"
                     min={0}
                     value={v.stock}
-                    onChange={(e) => updateVariant(idx, "stock", e.target.value)}
+                    onChange={(e) =>
+                      updateVariant(idx, "stock", e.target.value, v)
+                    }
                   />
                 </div>
 
@@ -522,9 +607,16 @@ export default function EditProductModal({ product, onClose, onSave }) {
           {/* Imágenes */}
           <div>
             <h3 className="font-semibold mb-2">Imágenes</h3>
-            <input type="file" multiple accept="image/*" onChange={handleFileChange} />
+            <input
+              type="file"
+              multiple
+              accept="image/*"
+              onChange={handleFileChange}
+            />
             {!!files.length && (
-              <p className="text-xs text-gray-500 mt-1">{files.length} archivo(s)</p>
+              <p className="text-xs text-gray-500 mt-1">
+                {files.length} archivo(s)
+              </p>
             )}
 
             <label className="mt-3 inline-flex items-center gap-2">
