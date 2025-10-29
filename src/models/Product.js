@@ -79,6 +79,7 @@ const ProductVariantSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    visibleFromDataverse: { type: Boolean, default: false },
   },
   { _id: false } // no generes _id para cada variante
 );
@@ -261,6 +262,7 @@ const ImageSchema = new mongoose.Schema({
 
 const ProductSchema = new mongoose.Schema(
   {
+    idDataverse: { type: String, unique: true, sparse: true },
     generic_id: String,
     external_id: { type: String, required: true, trim: true, index: true },
     name: { type: String, required: true },
@@ -330,20 +332,32 @@ const ProductSchema = new mongoose.Schema(
     // external_id: { type: String, default: null },
     // NUEVO: escalas de precio
     priceTiers: { type: [PriceTierSchema], default: [] },
+    visibleFromDataverse: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
 
 // Helpers locales
-const _norm = (s="") =>
-  s.toString().trim().toLowerCase()
-   .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-const _slug = (s="") => _norm(s).replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+const _norm = (s = "") =>
+  s
+    .toString()
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+const _slug = (s = "") =>
+  _norm(s)
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 
 function _buildVarSkuModel(product, v, idx) {
-  const base = product.sku || product.external_id || String(product._id || "prd");
-  const parts = [_slug(v.color || ""), _slug(v.material || ""), _slug(v.size || "")]
-    .filter(Boolean);
+  const base =
+    product.sku || product.external_id || String(product._id || "prd");
+  const parts = [
+    _slug(v.color || ""),
+    _slug(v.material || ""),
+    _slug(v.size || ""),
+  ].filter(Boolean);
   let draft = `${base}${parts.length ? "-" + parts.join("-") : ""}`;
   if (!parts.length) draft = `${base}-var-${idx + 1}`;
   return draft.toUpperCase();
@@ -353,16 +367,17 @@ function _ensureSkusModel(doc) {
   const seen = new Set();
   (doc.products || []).forEach((v, i) => {
     if (!v.sku || !v.sku.trim()) v.sku = _buildVarSkuModel(doc, v, i);
-    let c = v.sku; let k = 1;
+    let c = v.sku;
+    let k = 1;
     while (seen.has(c)) c = `${v.sku}-${++k}`;
-    v.sku = c; seen.add(c);
+    v.sku = c;
+    seen.add(c);
   });
 }
 
 ProductSchema.pre("validate", function () {
   _ensureSkusModel(this);
 });
-
 
 // ✅ Índice único para evitar duplicados del admin
 ProductSchema.index(
