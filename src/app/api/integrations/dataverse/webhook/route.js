@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
-import { connectDB } from "@/lib/mongo";
+import { connectDB } from '../../../../lib/mongoose';
 import Product from "@/models/Product";
 import DvEvent from "@/models/DvEvent";
 
