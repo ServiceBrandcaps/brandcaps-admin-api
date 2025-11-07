@@ -1,6 +1,14 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/mongoose";
 import Product from "@/models/Product";
+import {
+  buildProductFilters,
+  buildSortOptions,
+  parsePaginationParams,
+  buildFieldProjection,
+  logQueryPerformance,
+  validateQueryParams,
+} from "@/lib/productQueryOptimizer";
 
 function salePrice(p) {
   const base = Number(p?.price || 0);
@@ -32,95 +40,118 @@ function searchMainImage(p) {
 }
 
 export async function GET(req) {
-  await connectDB();
+  const startTime = Date.now();
+  
+  try {
+    await connectDB();
 
-  const url = new URL(req.url);
-  //const q = url.searchParams.get("q") || "";
-  const q = url.searchParams.get("q") || url.searchParams.get("name");
-  const family = url.searchParams.getAll("family") || [];
-  const subattrs = url.searchParams.getAll("sub") || [];
-  const sections = url.searchParams.getAll("section");
-  const page = parseInt(url.searchParams.get("page") || "1", 10);
-  const limit = parseInt(url.searchParams.get("limit") || "30", 10);
-  const skip = (page - 1) * limit;
+    const { searchParams } = new URL(req.url);
+    
+    // Validate query parameters
+    const validation = validateQueryParams(searchParams);
+    if (!validation.valid) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid query parameters', details: validation.errors },
+        { status: 400 }
+      );
+    }
 
-  const filters = {};
-  if (q) filters.name = new RegExp(q, "i");
-  //if (family) filters["families.description"] = new RegExp(family, "i");
-  if (family.length) {
-    const regexes = family.map((f) => new RegExp(f, "i"));
+    // Build optimized filters using utility function
+    const filters = buildProductFilters(searchParams);
+    
+    // Parse pagination parameters with limits
+    const { page, limit, skip } = parsePaginationParams(searchParams, {
+      defaultLimit: 30,
+      maxLimit: 100,
+    });
+    
+    // Build sort options
+    const sortOptions = buildSortOptions(searchParams);
+    
+    // Build field projection for faster queries (store context)
+    const projection = buildFieldProjection('store');
 
-    // Soporta dos formas de guardar familias:
-    // - como subdocs: [{ description }]
-    // - como array de strings: ["Escritura", ...]
-    filters.$or = [
-      { "families.description": { $in: regexes } },
-      { families: { $in: regexes } },
-    ];
+    // Execute count and find queries in parallel
+    const [total, docs] = await Promise.all([
+      Product.countDocuments(filters),
+      Product.find(filters, projection)
+        .sort(sortOptions)
+        .skip(skip)
+        .limit(limit)
+        .lean()
+        .exec(),
+    ]);
+
+    // Transform documents for client consumption
+    const items = docs.map((d) => ({
+      _id: d._id,
+      name: d.name,
+      image: searchMainImage(d),
+      images: d.images || [],
+      families: d.families || [],
+      subattributes: d.subattributes || [],
+      section: d.frontSection || null,
+      salePrice: salePrice(d),
+      products: (d.products || []).map((v) => ({
+        providerId: v.providerId ?? v.id ?? null,
+        sku: v.sku,
+        stock: Number(v.stock ?? 0),
+        size: v.size || "",
+        color: v.color || "",
+        achromatic: !!v.achromatic,
+      })),
+      minimum_order_quantity: d.minimum_order_quantity,
+      variants: (d?.variants?.colors || d?.variants?.sizes || []).map((v) => ({
+        providerId: v.providerId ?? v.id ?? null,
+        sku: v.sku,
+        generalDescription: v.generalDescription || "",
+        elementDescription1: v.elementDescription1 || "",
+        elementDescription2: v.elementDescription2 || "",
+        elementDescription3: v.elementDescription3 || "",
+        additionalDescription: v.additionalDescription || "",
+        stock: Number(v.stock ?? 0),
+        size: v.size || "",
+        color: v.color || "",
+        active: v.active || true,
+        achromatic: !!v.achromatic,
+      })),
+      tax: d.tax,
+      brandcapsProduct: d.brandcapsProduct || false,
+    }));
+
+    const totalPages = Math.ceil(total / limit);
+
+    // Log performance for monitoring
+    logQueryPerformance('/api/store/products', startTime, {
+      totalCount: total,
+      returnedCount: items.length,
+      filters,
+    });
+
+    return NextResponse.json({
+      success: true,
+      items,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+      // Legacy fields for backward compatibility
+      total,
+      totalPages,
+    });
+  } catch (error) {
+    console.error('[GET /api/store/products] Error:', error);
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'Failed to fetch products',
+        message: error.message,
+      },
+      { status: 500 }
+    );
   }
-  if (subattrs.length) {
-    filters["subattributes.name"] = {
-      $in: subattrs.map((s) => new RegExp(s, "i")),
-    };
-  }
-  if (sections.length) {
-    filters.frontSection = {
-      $in: sections.map((s) => new RegExp(`^${s}$`, "i")),
-    };
-  }
-
-  const total = await Product.countDocuments(filters);
-  const docs = await Product.find(filters)
-    .select(
-      "name price marginPercentage families subattributes images frontSection products tax minimum_order_quantity variants brandcapsProduct"
-    )
-    .skip(skip)
-    .limit(limit)
-    .lean();
-
-  const items = docs.map((d) => ({
-    _id: d._id,
-    name: d.name,
-    image: searchMainImage(d), //d.images?.[0]?.image_url || d.images?.[0]?.url || null,
-    images: d.images || [],
-    families: d.families || [],
-    subattributes: d.subattributes || [],
-    section: d.frontSection || null,
-    // lo que consume el front:
-    salePrice: salePrice(d),
-    products: (d.products || []).map((v) => ({
-      providerId: v.providerId ?? v.id ?? null,
-      sku: v.sku,
-      stock: Number(v.stock ?? 0),
-      size: v.size || "",
-      color: v.color || "",
-      achromatic: !!v.achromatic,
-    })),
-    minimum_order_quantity: d.minimum_order_quantity,
-    variants: (d?.variants?.colors || d?.variants?.sizes || []).map((v) => ({
-      providerId: v.providerId ?? v.id ?? null,
-      sku: v.sku,
-      generalDescription: v.generalDescription || "",
-      elementDescription1: v.elementDescription1 || "",
-      elementDescription2: v.elementDescription2 || "",
-      elementDescription3: v.elementDescription3 || "",
-      additionalDescription: v.additionalDescription || "",
-      stock: Number(v.stock ?? 0),
-      size: v.size || "",
-      color: v.color || "",
-      active: v.active || true,
-      achromatic: !!v.achromatic,
-    })),
-    tax: d.tax,
-    brandcapsProduct: d.brandcapsProduct || false,
-  }));
-
-  //console.log(items[0]);
-
-  return NextResponse.json({
-    items,
-    total,
-    totalPages: Math.ceil(total / limit),
-    page,
-  });
 }
