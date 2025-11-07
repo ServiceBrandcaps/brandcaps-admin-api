@@ -4,6 +4,14 @@ import { connectDB } from "@/lib/mongoose";
 import Product from "@/models/Product";
 import { uploadBufferToCloudinary } from "@/lib/uploads";
 import { generateSku } from "@/lib/sku";
+import {
+  buildProductFilters,
+  buildSortOptions,
+  parsePaginationParams,
+  buildFieldProjection,
+  logQueryPerformance,
+  validateQueryParams,
+} from "@/lib/productQueryOptimizer";
 
 export const runtime = "nodejs";
 
@@ -113,302 +121,443 @@ function normalizeImages(input) {
 
 /**
  * GET /api/admin/products
+ * Optimized endpoint with:
+ * - Better query building and filtering
+ * - Field projection for faster queries
+ * - Improved pagination
+ * - Text search support
+ * - Performance logging
  */
 export async function GET(req) {
-  await connectDB();
+  const startTime = Date.now();
+  
+  try {
+    await connectDB();
 
-  const { searchParams } = new URL(req.url);
-  const filters = {};
+    const { searchParams } = new URL(req.url);
+    
+    // Validate query parameters
+    const validation = validateQueryParams(searchParams);
+    if (!validation.valid) {
+      return NextResponse.json(
+        { error: 'Invalid query parameters', details: validation.errors },
+        { status: 400 }
+      );
+    }
 
-  if (searchParams.has("name")) {
-    filters.name = new RegExp(searchParams.get("name"), "i");
+    // Build optimized filters using utility function
+    const filters = buildProductFilters(searchParams);
+    
+    // Parse pagination parameters with limits
+    const { page, limit, skip } = parsePaginationParams(searchParams, {
+      defaultLimit: 50,
+      maxLimit: 100,
+    });
+    
+    // Build sort options
+    const sortOptions = buildSortOptions(searchParams);
+    
+    // Build field projection for faster queries
+    // Can be overridden with ?fields=list|admin|store
+    const projectionType = searchParams.get('fields') || 'admin';
+    const projection = buildFieldProjection(projectionType);
+
+    // Execute count and find queries
+    // Use countDocuments with same filters for accurate count
+    const [totalCount, products] = await Promise.all([
+      Product.countDocuments(filters),
+      Product.find(filters, projection)
+        .sort(sortOptions)
+        .skip(skip)
+        .limit(limit)
+        .lean()
+        .exec(),
+    ]);
+
+    const totalPages = Math.ceil(totalCount / limit);
+
+    // Log performance for monitoring
+    logQueryPerformance('/api/admin/products', startTime, {
+      totalCount,
+      returnedCount: products.length,
+      filters,
+    });
+
+    return NextResponse.json({
+      success: true,
+      items: products,
+      products, // Keep for backward compatibility
+      pagination: {
+        page,
+        limit,
+        total: totalCount,
+        totalCount, // Keep for backward compatibility
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+      // Legacy fields for backward compatibility
+      total: totalCount,
+      totalCount,
+      totalPages,
+    });
+  } catch (error) {
+    console.error('[GET /api/admin/products] Error:', error);
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'Failed to fetch products',
+        message: error.message,
+      },
+      { status: 500 }
+    );
   }
-
-  const families = searchParams.getAll("family");
-  if (families.length) {
-    filters["families.description"] = {
-      $in: families.map((v) => new RegExp(v, "i")),
-    };
-  }
-
-  const subattrs = searchParams.getAll("subattribute");
-  if (subattrs.length) {
-    filters["subattributes.name"] = {
-      $in: subattrs.map((v) => new RegExp(v, "i")),
-    };
-  }
-
-  const page = parseInt(searchParams.get("page") || "1", 10);
-  const limit = parseInt(searchParams.get("limit") || "100", 10);
-  const skip = (page - 1) * limit;
-
-  const totalCount = await Product.countDocuments(filters);
-  const totalPages = Math.ceil(totalCount / limit);
-  const products = await Product.find(filters).skip(skip).limit(limit).lean();
-
-  return NextResponse.json({
-    items: products,
-    products,
-    total: totalCount,
-    totalCount,
-    totalPages,
-    page,
-  });
 }
 
 /**
  * POST /api/admin/products
  * Soporta multipart/form-data o application/json
+ * Optimized with:
+ * - Better error handling
+ * - Request validation
+ * - Idempotency support
+ * - Performance logging
  */
 export async function POST(req) {
-  await connectDB();
-  await ensureIndexes();
-  const contentType = (req.headers.get("content-type") || "").toLowerCase();
-  const idemKey = req.headers.get("x-idempotency-key")?.trim() || null;
+  const startTime = Date.now();
+  
+  try {
+    await connectDB();
+    await ensureIndexes();
+    
+    const contentType = (req.headers.get("content-type") || "").toLowerCase();
+    const idemKey = req.headers.get("x-idempotency-key")?.trim() || null;
 
-  if (
-    contentType.includes("multipart/form-data") ||
-    contentType.includes("application/x-www-form-urlencoded")
-  ) {
-    const formData = await req.formData();
-    //return createFromFormData(formData);
-    return createFromFormData(formData, idemKey);
-  }
-
-  if (contentType.includes("application/json")) {
-    const body = await req.json().catch(() => null);
-    if (!body) {
-      return NextResponse.json({ error: "JSON body vacío" }, { status: 400 });
+    if (
+      contentType.includes("multipart/form-data") ||
+      contentType.includes("application/x-www-form-urlencoded")
+    ) {
+      const formData = await req.formData();
+      const result = await createFromFormData(formData, idemKey);
+      
+      // Log performance
+      const duration = Date.now() - startTime;
+      console.log(`[POST /api/admin/products] Completed in ${duration}ms`);
+      
+      return result;
     }
-    //return createFromJson(body);
-    return createFromJson(body, idemKey);
-  }
 
-  return NextResponse.json(
-    { error: `Unsupported Content-Type: ${contentType}` },
-    { status: 415 }
-  );
+    if (contentType.includes("application/json")) {
+      const body = await req.json().catch(() => null);
+      if (!body) {
+        return NextResponse.json(
+          { success: false, error: "JSON body vacío o inválido" },
+          { status: 400 }
+        );
+      }
+      
+      const result = await createFromJson(body, idemKey);
+      
+      // Log performance
+      const duration = Date.now() - startTime;
+      console.log(`[POST /api/admin/products] Completed in ${duration}ms`);
+      
+      return result;
+    }
+
+    return NextResponse.json(
+      { 
+        success: false,
+        error: `Unsupported Content-Type: ${contentType}`,
+        message: 'Use multipart/form-data or application/json'
+      },
+      { status: 415 }
+    );
+  } catch (error) {
+    console.error('[POST /api/admin/products] Error:', error);
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'Failed to create product',
+        message: error.message,
+      },
+      { status: 500 }
+    );
+  }
 }
 
 /**
  * PATCH /api/admin/products
+ * Optimized with:
+ * - Better error handling
+ * - Request validation
+ * - Performance logging
  */
 export async function PATCH(req) {
-  await connectDB();
-  const contentType = (req.headers.get("content-type") || "").toLowerCase();
+  const startTime = Date.now();
+  
+  try {
+    await connectDB();
+    
+    const contentType = (req.headers.get("content-type") || "").toLowerCase();
 
-  if (
-    contentType.includes("multipart/form-data") ||
-    contentType.includes("application/x-www-form-urlencoded")
-  ) {
-    const formData = await req.formData();
-    return patchFromFormData(formData);
+    if (
+      contentType.includes("multipart/form-data") ||
+      contentType.includes("application/x-www-form-urlencoded")
+    ) {
+      const formData = await req.formData();
+      const result = await patchFromFormData(formData);
+      
+      // Log performance
+      const duration = Date.now() - startTime;
+      console.log(`[PATCH /api/admin/products] Completed in ${duration}ms`);
+      
+      return result;
+    }
+
+    if (contentType.includes("application/json")) {
+      const body = await req.json().catch(() => null);
+      if (!body) {
+        return NextResponse.json(
+          { success: false, error: "JSON body vacío o inválido" },
+          { status: 400 }
+        );
+      }
+      
+      const result = await patchFromJson(body);
+      
+      // Log performance
+      const duration = Date.now() - startTime;
+      console.log(`[PATCH /api/admin/products] Completed in ${duration}ms`);
+      
+      return result;
+    }
+
+    return NextResponse.json(
+      {
+        success: false,
+        error: `Unsupported Content-Type: ${contentType}`,
+        message: 'Use multipart/form-data or application/json'
+      },
+      { status: 415 }
+    );
+  } catch (error) {
+    console.error('[PATCH /api/admin/products] Error:', error);
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'Failed to update product',
+        message: error.message,
+      },
+      { status: 500 }
+    );
   }
-
-  if (contentType.includes("application/json")) {
-    const body = await req.json();
-    return patchFromJson(body);
-  }
-
-  return NextResponse.json(
-    { error: `Unsupported Content-Type: ${contentType}` },
-    { status: 415 }
-  );
 }
 
 /* ===================== HELPERS ===================== */
 
 async function createFromFormData(formData, idemKey) {
-  const name = formData.get("name")?.toString().trim() ?? "";
-  const priceStr = formData.get("price")?.toString() ?? "";
-  const marginStr = formData.get("marginPercentage")?.toString() ?? "0";
-  const section = formData.get("section")?.toString() ?? "";
-  const frontSection = formData.get("frontSection")?.toString() ?? section;
-  const description = formData.get("description")?.toString() ?? "";
-  const isBrandcaps =
-    (formData.get("isBrandcaps")?.toString() ?? "false") === "true";
+  try {
+    const name = formData.get("name")?.toString().trim() ?? "";
+    const priceStr = formData.get("price")?.toString() ?? "";
+    const marginStr = formData.get("marginPercentage")?.toString() ?? "0";
+    const section = formData.get("section")?.toString() ?? "";
+    const frontSection = formData.get("frontSection")?.toString() ?? section;
+    const description = formData.get("description")?.toString() ?? "";
+    const isBrandcaps =
+      (formData.get("isBrandcaps")?.toString() ?? "false") === "true";
 
-  // mínimo de pedido (default 20)
-  const moq = num(formData.get("minimum_order_quantity"), 20);
-  // escalas de precio
-  const p20_100 = num(formData.get("price_20_100"), 0);
-  const p100_plus = num(formData.get("price_100_plus"), 0);
-  const p500_plus = num(formData.get("price_500_plus"), 0);
-
-  const priceTiers = [
-    { min: 20, max: 100, price: p20_100 },
-    { min: 101, max: 499, price: p100_plus },
-    { min: 500, max: null, price: p500_plus },
-  ].filter((t) => t.price > 0);
-
-  // variantes (puede venir JSON o vacío)
-  const variantsInput = formData.get("variants") || "[]";
-  const variantsIn = parseMaybeJSON(variantsInput, []);
-  const variants = variantsIn.map((v) => ({
-    idDataverse: v.idDataverse || "",
-    id: v.id ?? undefined,
-    sku:
-      v.sku ||
-      generateSku({
-        name,
-        color: v.color || "",
-        size: v.size || "",
-        material: v.material || "",
-      }),
-    stock: num(v.stock, 0),
-    color: v.color || "",
-    size: v.size || "",
-    material: v.material || "",
-    achromatic: !!v.achromatic,
-  }));
-
-  // families / subattributes (coma-separados o JSON)
-  const families = parseFamilies(formData.get("families"));
-  const subattributes = parseSubattributes(formData.get("subattributes"));
-
-  // Imágenes -> Cloudinary
-  const files = formData.getAll("images");
-  const images = [];
-  for (const file of files) {
-    // En App Router los File vienen del Web API
-    if (typeof File !== "undefined" && file instanceof File) {
-      const buf = Buffer.from(await file.arrayBuffer());
-      const url = await uploadBufferToCloudinary(buf, file.name);
-      images.push({ image_url: url });
+    // Validate required fields
+    if (!name) {
+      return NextResponse.json(
+        { success: false, error: "El nombre del producto es obligatorio" },
+        { status: 400 }
+      );
     }
-  }
+    
+    if (!priceStr || isNaN(priceStr)) {
+      return NextResponse.json(
+        { success: false, error: "El precio del producto es obligatorio y debe ser un número válido" },
+        { status: 400 }
+      );
+    }
 
-  const external_id = generateSku(name);
+    // mínimo de pedido (default 20)
+    const moq = num(formData.get("minimum_order_quantity"), 20);
+    // escalas de precio
+    const p20_100 = num(formData.get("price_20_100"), 0);
+    const p100_plus = num(formData.get("price_100_plus"), 0);
+    const p500_plus = num(formData.get("price_500_plus"), 0);
 
-  const doc = {
-    external_id,
-    name,
-    description,
-    price: Number(priceStr),
-    marginPercentage: Number(marginStr) || 0,
-    frontSection,
-    brandcapsProduct: isBrandcaps,
-    minimum_order_quantity: moq,
-    priceTiers,
-    families,
-    subattributes,
-    images,
-    products: variants,
-  };
+    const priceTiers = [
+      { min: 20, max: 100, price: p20_100 },
+      { min: 101, max: 499, price: p100_plus },
+      { min: 500, max: null, price: p500_plus },
+    ].filter((t) => t.price > 0);
 
-  if (!name || !priceStr) {
+    // variantes (puede venir JSON o vacío)
+    const variantsInput = formData.get("variants") || "[]";
+    const variantsIn = parseMaybeJSON(variantsInput, []);
+    const variants = variantsIn.map((v) => ({
+      idDataverse: v.idDataverse || "",
+      id: v.id ?? undefined,
+      sku:
+        v.sku ||
+        generateSku({
+          name,
+          color: v.color || "",
+          size: v.size || "",
+          material: v.material || "",
+        }),
+      stock: num(v.stock, 0),
+      color: v.color || "",
+      size: v.size || "",
+      material: v.material || "",
+      achromatic: !!v.achromatic,
+    }));
+
+    // families / subattributes (coma-separados o JSON)
+    const families = parseFamilies(formData.get("families"));
+    const subattributes = parseSubattributes(formData.get("subattributes"));
+
+    // Imágenes -> Cloudinary
+    const files = formData.getAll("images");
+    const images = [];
+    for (const file of files) {
+      // En App Router los File vienen del Web API
+      if (typeof File !== "undefined" && file instanceof File) {
+        const buf = Buffer.from(await file.arrayBuffer());
+        const url = await uploadBufferToCloudinary(buf, file.name);
+        images.push({ image_url: url });
+      }
+    }
+
+    const external_id = generateSku(name);
+
+    const doc = {
+      external_id,
+      name,
+      description,
+      price: Number(priceStr),
+      marginPercentage: Number(marginStr) || 0,
+      frontSection,
+      brandcapsProduct: isBrandcaps,
+      minimum_order_quantity: moq,
+      priceTiers,
+      families,
+      subattributes,
+      images,
+      products: variants,
+    };
+
+    return createOnce(doc, idemKey);
+  } catch (error) {
+    console.error('[createFromFormData] Error:', error);
     return NextResponse.json(
-      { error: "Nombre y precio son obligatorios" },
-      { status: 400 }
+      {
+        success: false,
+        error: "Error al procesar los datos del formulario",
+        message: error.message,
+      },
+      { status: 500 }
     );
   }
-
-  // try {
-  //   const created = await Product.create({ ...doc });
-  //   return NextResponse.json(created, { status: 201 });
-  // } catch (err) {
-  //   // Si otro request simultáneo ya lo insertó: devolvemos el existente.
-  //   if (err?.code === 11000) {
-  //     const existing = await Product.findOne({
-  //       external_id: doc.external_id,
-  //     }).lean();
-  //     // 200 está bien para idempotencia; si preferís, podés usar 201 igual.
-  //     return NextResponse.json(existing || {}, { status: 200 });
-  //   }
-  //   return NextResponse.json({ error: err.message }, { status: 500 });
-  // }
-
-  return createOnce(doc, idemKey);
 }
 
 async function createFromJson(body, idemKey) {
-  const {
-    name = "",
-    price,
-    marginPercentage = 0,
-    section,
-    frontSection: fs,
-    description = "",
-    isBrandcaps = true,
-    minimum_order_quantity = 20,
-    price_20_100 = 0,
-    price_100_plus = 0,
-    price_500_plus = 0,
-    images = [],
-    families: famIn = [],
-    subattributes: subIn = [],
-    variants = [], // puede ser array o string JSON
-  } = body || {};
+  try {
+    const {
+      name = "",
+      price,
+      marginPercentage = 0,
+      section,
+      frontSection: fs,
+      description = "",
+      isBrandcaps = true,
+      minimum_order_quantity = 20,
+      price_20_100 = 0,
+      price_100_plus = 0,
+      price_500_plus = 0,
+      images = [],
+      families: famIn = [],
+      subattributes: subIn = [],
+      variants = [], // puede ser array o string JSON
+    } = body || {};
 
-  if (!name.trim() || price == null) {
+    // Validate required fields
+    if (!name.trim()) {
+      return NextResponse.json(
+        { success: false, error: "El nombre del producto es obligatorio" },
+        { status: 400 }
+      );
+    }
+    
+    if (price == null || isNaN(price)) {
+      return NextResponse.json(
+        { success: false, error: "El precio del producto es obligatorio y debe ser un número válido" },
+        { status: 400 }
+      );
+    }
+
+    const priceTiers = [
+      { min: 20, max: 100, price: price_20_100 },
+      { min: 101, max: 499, price: price_100_plus },
+      { min: 500, max: null, price: price_500_plus },
+    ].filter((t) => t.price > 0);
+
+    const families = parseFamilies(famIn);
+    const subattributes = parseSubattributes(subIn);
+    const variantsArr = parseMaybeJSON(variants, []);
+    const imagesNorm = normalizeImages(images);
+
+    const variantsMapped = variantsArr.map((v) => ({
+      idDataverse: v.idDataverse || "",
+      id: v.id ?? undefined,
+      sku:
+        v.sku ||
+        generateSku({
+          name,
+          color: v.color || "",
+          size: v.size || "",
+          material: v.material || "",
+        }),
+      stock: num(v.stock, 0),
+      color: v.color || "",
+      size: v.size || "",
+      material: v.material || "",
+      achromatic: !!v.achromatic,
+    }));
+
+    const external_id = generateSku(name);
+
+    const doc = {
+      external_id,
+      name: name.trim(),
+      description,
+      price: Number(price),
+      marginPercentage: Number(marginPercentage) || 0,
+      frontSection: fs ?? section ?? "",
+      brandcapsProduct: !!isBrandcaps,
+      minimum_order_quantity,
+      priceTiers,
+      images: imagesNorm,
+      families,
+      subattributes,
+      products: variantsMapped,
+    };
+
+    return createOnce(doc, idemKey);
+  } catch (error) {
+    console.error('[createFromJson] Error:', error);
     return NextResponse.json(
-      { error: "Nombre y precio son obligatorios" },
-      { status: 400 }
+      {
+        success: false,
+        error: "Error al procesar los datos JSON",
+        message: error.message,
+      },
+      { status: 500 }
     );
   }
-
-  const priceTiers = [
-    { min: 20, max: 100, price: price_20_100 },
-    { min: 101, max: 499, price: price_100_plus },
-    { min: 500, max: null, price: price_500_plus },
-  ].filter((t) => t.price > 0);
-
-  const families = parseFamilies(famIn);
-  const subattributes = parseSubattributes(subIn);
-  const variantsArr = parseMaybeJSON(variants, []);
-  const imagesNorm = normalizeImages(images);
-
-  const variantsMapped = variantsArr.map((v) => ({
-    idDataverse: v.idDataverse || "",
-    id: v.id ?? undefined,
-    sku:
-      v.sku ||
-      generateSku({
-        name,
-        color: v.color || "",
-        size: v.size || "",
-        material: v.material || "",
-      }),
-    stock: num(v.stock, 0),
-    color: v.color || "",
-    size: v.size || "",
-    material: v.material || "",
-    achromatic: !!v.achromatic,
-  }));
-
-  const external_id = generateSku(name);
-
-  const doc = {
-    external_id,
-    name: name.trim(),
-    description,
-    price: Number(price),
-    marginPercentage: Number(marginPercentage) || 0,
-    frontSection: fs ?? section ?? "",
-    brandcapsProduct: !!isBrandcaps,
-    minimum_order_quantity,
-    priceTiers,
-    images: imagesNorm,
-    families,
-    subattributes,
-    products: variantsMapped,
-  };
-
-  // try {
-  //   const created = await Product.create({ ...doc });
-  //   return NextResponse.json(created, { status: 201 });
-  // } catch (err) {
-  //   // Si otro request simultáneo ya lo insertó: devolvemos el existente.
-  //   if (err?.code === 11000) {
-  //     const existing = await Product.findOne({
-  //       external_id: doc.external_id,
-  //     }).lean();
-  //     // 200 está bien para idempotencia; si preferís, podés usar 201 igual.
-  //     return NextResponse.json(existing || {}, { status: 200 });
-  //   }
-  //   return NextResponse.json({ error: err.message }, { status: 500 });
-  // }
-  return createOnce(doc, idemKey);
 }
 
 async function patchFromJson(body) {

@@ -395,6 +395,47 @@ ProductSchema.index(
   { unique: true, sparse: true, name: "products.sku_1" }
 );
 
+// Performance indexes for common queries
+ProductSchema.index({ name: 1 }, { name: "name_1" }); // For name searches
+ProductSchema.index({ "families.description": 1 }, { name: "families_description_1" }); // For family filters
+ProductSchema.index({ "families.id": 1 }, { name: "families_id_1" }); // For family filters
+ProductSchema.index({ frontSection: 1 }, { name: "frontSection_1" }); // For section filtering
+ProductSchema.index({ "subattributes.name": 1 }, { name: "subattributes_name_1" }); // For subattribute filters
+ProductSchema.index({ price: 1 }, { name: "price_1" }); // For price sorting
+ProductSchema.index({ createdAt: -1 }, { name: "createdAt_desc" }); // For "new arrivals"
+ProductSchema.index({ updatedAt: -1 }, { name: "updatedAt_desc" }); // For sync optimization
+ProductSchema.index({ brandcapsProduct: 1 }, { name: "brandcapsProduct_1" }); // For filtering by source
+
+// Text index for search functionality (weighted for relevance)
+ProductSchema.index(
+  { 
+    name: "text", 
+    description: "text",
+    "families.description": "text",
+    "subattributes.name": "text"
+  },
+  {
+    name: "product_search_text",
+    weights: {
+      name: 10,
+      "families.description": 5,
+      "subattributes.name": 3,
+      description: 1
+    }
+  }
+);
+
+// Compound indexes for common filter combinations
+ProductSchema.index(
+  { frontSection: 1, "families.description": 1, price: 1 },
+  { name: "section_family_price" }
+); // Filter by section + family + sort by price
+
+ProductSchema.index(
+  { brandcapsProduct: 1, frontSection: 1, createdAt: -1 },
+  { name: "source_section_recent" }
+); // For filtering by source + section with recent first
+
 // ⚠️ Forzar recompilación del modelo en hot-reload:
 if (mongoose.models.Product) {
   delete mongoose.models.Product; // (Mongoose < 7)

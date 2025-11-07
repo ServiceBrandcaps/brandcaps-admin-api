@@ -332,20 +332,62 @@ const ProductSchema = new Schema(
 );
 
 // ---- Índices útiles ----
-ProductSchema.index({ name: "text", description: "text", tag: "text" });
+// ---- Índices útiles ----
+// Text index for search functionality (weighted for relevance)
+ProductSchema.index(
+  { 
+    name: "text", 
+    description: "text", 
+    tag: "text",
+    "families.description": "text",
+    "subattributes.name": "text"
+  },
+  {
+    name: "product_search_text",
+    weights: {
+      name: 10,
+      "families.description": 5,
+      "subattributes.name": 3,
+      description: 1,
+      tag: 2
+    }
+  }
+);
+
 // ✅ Índice único para evitar duplicados del admin
 ProductSchema.index(
   { external_id: 1 },
   { unique: true, name: "external_id_1" }
 );
 
-// ✅ Índice único “sparse” para los docs que vienen de Zecat
+// ✅ Índice único "sparse" para los docs que vienen de Zecat
 // (sparse permite que otros docs sin 'id' no violen el índice)
 ProductSchema.index({ id: 1 }, { unique: true, sparse: true, name: "id_1" });
 
+// Variant-related indexes
 ProductSchema.index({ "variants.colors.sku": 1 });
 ProductSchema.index({ "variants.sizes.sku": 1 });
 ProductSchema.index({ "variants.colors.stock": -1 });
+
+// Performance indexes for common queries
+ProductSchema.index({ name: 1 }, { name: "name_1" }); // For name searches
+ProductSchema.index({ "families.description": 1 }, { name: "families_description_1" }); // For family filters
+ProductSchema.index({ "families.id": 1 }, { name: "families_id_1" }); // For family filters
+ProductSchema.index({ "subattributes.name": 1 }, { name: "subattributes_name_1" }); // For subattribute filters
+ProductSchema.index({ price: 1 }, { name: "price_1" }); // For price sorting
+ProductSchema.index({ createdAt: -1 }, { name: "createdAt_desc" }); // For "new arrivals"
+ProductSchema.index({ updatedAt: -1 }, { name: "updatedAt_desc" }); // For sync optimization
+
+// Compound indexes for common filter combinations
+ProductSchema.index(
+  { "families.description": 1, price: 1 },
+  { name: "family_price" }
+); // Filter by family + sort by price
+
+ProductSchema.index(
+  { published: 1, featured: 1, createdAt: -1 },
+  { name: "published_featured_recent" }
+); // For featured products listing
 
 // ---- Helpers ----
 // function normalizeVariants(v) {
