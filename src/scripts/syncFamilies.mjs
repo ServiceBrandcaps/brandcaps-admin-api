@@ -2,7 +2,7 @@ import "dotenv/config";
 import mongoose from "mongoose";
 
 const MONGODB_URI = process.env.MONGODB_URI;
-const ZECAT_API = process.env.ZECAT_BASE;
+const ZECAT_API = `${process.env.ZECAT_BASE}/family`;
 const ZECAT_TOKEN = process.env.ZECAT_TOKEN; // Bearer real
 
 const FamilySchema = new mongoose.Schema({
