@@ -1,18 +1,21 @@
 // src/components/admin/products/EditProductModal.js
 "use client";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 export default function EditProductModal({ product, onClose, onSave }) {
   const isBrandcaps = !!product?.brandcapsProduct;
 
   // ===== Helpers de prefill =====
-  const tier = (min, max) =>
-    (product?.priceTiers || []).find((t) => t.min === min && t.max === max)
-      ?.price ?? "";
+  const tier = useCallback(
+    (min, max) =>
+      (product?.priceTiers || []).find((t) => t.min === min && t.max === max)
+        ?.price ?? "",
+    [product]
+  );
 
-  const tier20_100 = useMemo(() => tier(20, 100), [product]);
-  const tier100_plus = useMemo(() => tier(101, 499), [product]);
-  const tier500_plus = useMemo(() => tier(500, null), [product]);
+  const tier20_100 = useMemo(() => tier(20, 100), [tier]);
+  const tier100_plus = useMemo(() => tier(101, 499), [tier]);
+  const tier500_plus = useMemo(() => tier(500, null), [tier]);
 
   const familiesPrefill = useMemo(
     () =>
