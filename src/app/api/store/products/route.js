@@ -158,9 +158,30 @@ export async function GET(req) {
     /* ---------- Filtros base ---------- */
     const filtersBase = buildProductFilters(searchParams);
 
+    // Collation consistente para búsquedas insensibles a mayúsculas/acentos
+    const collation = { locale: "es", strength: 1 };
+
+    // Si hay término de búsqueda y existe un match exacto, priorizarlo
+    const rawSearch =
+      searchParams.get("search") || searchParams.get("q") || searchParams.get("name");
+    const searchTerm = rawSearch?.trim();
+
+    let filters = { ...filtersBase };
+
+    if (searchTerm) {
+      const exactNameRegex = new RegExp(`^\\s*${esc(searchTerm)}\\s*$`, "i");
+      const hasExactName = await Product.exists({ name: exactNameRegex }).collation(collation);
+
+      if (hasExactName) {
+        filters = { ...filters, name: exactNameRegex };
+        if (filters.$text) delete filters.$text;
+      }
+    }
+
     // FIX: si el optimizador metió un filtro genérico sobre families.description, lo quitamos
     if (Object.prototype.hasOwnProperty.call(filtersBase, "families.description")) {
       delete filtersBase["families.description"];
+      delete filters["families.description"];
     }
 
     // Exclusión robusta de LOGO 24 sin romper otras familias (se puede forzar incluir con ?includeLogo24=1)
@@ -225,7 +246,6 @@ export async function GET(req) {
       .filter(Boolean);
 
     // Armado final de filtros: base -> excl LOGO24 -> familia
-    let filters = { ...filtersBase };
 
     if (logo24Exclusion) {
       filters = Object.keys(filters).length ? { $and: [filters, logo24Exclusion] } : logo24Exclusion;
@@ -243,7 +263,6 @@ export async function GET(req) {
     });
     const sortOptions = buildSortOptions(searchParams);
     const projection = buildFieldProjection("store");
-    const collation = { locale: "es", strength: 1 };
 
     // Queries
     const [total, docs] = await Promise.all([
