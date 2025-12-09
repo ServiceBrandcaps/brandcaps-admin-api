@@ -87,7 +87,8 @@ export default function ProductsManager() {
   }, [authLoading, token]);
 
   // 2) Carga de productos según page + filter
-  const loadProducts = async () => {
+  const loadProducts = useCallback(async () => {
+    if (authLoading || !token) return;
     console.log("📦 cargando productos page", page, filter);
     setLoading(true);
     try {
@@ -114,13 +115,12 @@ export default function ProductsManager() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [authLoading, filter, page, token]);
 
   // dispara loadProducts cuando cambian page o filter
   useEffect(() => {
-    if (authLoading || !token) return;
     loadProducts();
-  }, [page, filter, authLoading, token]);
+  }, [loadProducts]);
 
   // memoiza la función para que su identidad no cambie en cada render
   const onFilterChange = useCallback(
