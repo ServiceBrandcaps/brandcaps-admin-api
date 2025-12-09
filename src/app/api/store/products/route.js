@@ -261,7 +261,7 @@ export async function GET(req) {
       defaultLimit: 30,
       maxLimit: 100,
     });
-    const sortOptions = buildSortOptions(searchParams);
+    const sortOptions = buildSortOptions(searchParams, { useTextScore: Boolean(filters.$text) });
     const projection = buildFieldProjection("store");
 
     // Queries

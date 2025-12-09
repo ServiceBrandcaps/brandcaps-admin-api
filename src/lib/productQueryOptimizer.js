@@ -84,10 +84,14 @@ export function buildProductFilters(searchParams) {
 
 /**
  * Build sort options from query parameters
- * @param {URLSearchParams} searchParams 
+ * @param {URLSearchParams} searchParams
+ * @param {Object} options
+ * @param {boolean} [options.useTextScore] - force whether to include text score sorting
  * @returns {Object} MongoDB sort object
  */
-export function buildSortOptions(searchParams) {
+export function buildSortOptions(searchParams, { useTextScore } = {}) {
+  const hasSearch =
+    useTextScore ?? Boolean(searchParams.get('search') || searchParams.get('q'));
   const sortBy = searchParams.get('sortBy') || 'createdAt';
   const sortOrder = searchParams.get('sortOrder') === 'asc' ? 1 : -1;
   
@@ -98,14 +102,14 @@ export function buildSortOptions(searchParams) {
     'updatedAt',
     'marginPercentage',
     // Text search score
-    ...(searchParams.get('search') || searchParams.get('q') ? ['score'] : [])
+    ...(hasSearch ? ['score'] : [])
   ];
   
   // Default to createdAt if invalid field
   const field = validSortFields.includes(sortBy) ? sortBy : 'createdAt';
   
   // For text search, add score sorting
-  if (searchParams.get('search') || searchParams.get('q')) {
+  if (hasSearch) {
     return { score: { $meta: 'textScore' }, [field]: sortOrder };
   }
   
